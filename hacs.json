@@ -1,5 +1,7 @@
 {
     "name": "DPK Finnhub",
-    "homeassistant": "2026.2.2",
-    "hacs": "2.0.5"
+    "country": "ALL",
+    "hide_default_branch": true,
+    "homeassistant": "2025.5.3",
+    "render_readme": true
 }
