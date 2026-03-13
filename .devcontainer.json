@@ -1,6 +1,6 @@
 {
-    "name": "dpktjf/dpk_finnhub",
-    "image": "mcr.microsoft.com/devcontainers/python:3.13",
+    "name": "dpktjf/dpk-finnhub",
+    "image": "mcr.microsoft.com/devcontainers/python:3",
     "postCreateCommand": "scripts/setup",
     "forwardPorts": [
         8123
