@@ -1,57 +1,89 @@
-"""Sensor platform for integration_blueprint."""
-
+"""Sensor platform for Finnhub Stock Quotes."""
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import logging
 
-from homeassistant.components.sensor import SensorEntity, SensorEntityDescription
+from homeassistant.components.sensor import SensorEntity, SensorStateClass
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import CONF_API_KEY
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .entity import IntegrationBlueprintEntity
-
-if TYPE_CHECKING:
-    from homeassistant.core import HomeAssistant
-    from homeassistant.helpers.entity_platform import AddEntitiesCallback
-
-    from .coordinator import BlueprintDataUpdateCoordinator
-    from .data import IntegrationBlueprintConfigEntry
-
-ENTITY_DESCRIPTIONS = (
-    SensorEntityDescription(
-        key="integration_blueprint",
-        name="Integration Sensor",
-        icon="mdi:format-quote-close",
-    ),
+from .const import (
+    ATTR_CHANGE,
+    ATTR_CHANGE_PERCENT,
+    ATTR_HIGH,
+    ATTR_LOW,
+    ATTR_OPEN,
+    ATTR_PREVIOUS_CLOSE,
+    ATTR_SYMBOL,
+    CONF_SYMBOLS,
+    DOMAIN,
 )
+from .coordinator import FinnhubCoordinator
+
+_LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
-    hass: HomeAssistant,  # noqa: ARG001 Unused function argument: `hass`
-    entry: IntegrationBlueprintConfigEntry,
+    hass: HomeAssistant,
+    entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up the sensor platform."""
+    """Set up Finnhub sensors from a config entry."""
+    coordinator: FinnhubCoordinator = hass.data[DOMAIN][entry.entry_id]
+    symbols: list[str] = entry.data[CONF_SYMBOLS]
+
     async_add_entities(
-        IntegrationBlueprintSensor(
-            coordinator=entry.runtime_data.coordinator,
-            entity_description=entity_description,
-        )
-        for entity_description in ENTITY_DESCRIPTIONS
+        FinnhubQuoteSensor(coordinator, symbol) for symbol in symbols
     )
 
 
-class IntegrationBlueprintSensor(IntegrationBlueprintEntity, SensorEntity):
-    """integration_blueprint Sensor class."""
+class FinnhubQuoteSensor(CoordinatorEntity[FinnhubCoordinator], SensorEntity):
+    """A sensor representing the current price of a single equity symbol."""
 
-    def __init__(
-        self,
-        coordinator: BlueprintDataUpdateCoordinator,
-        entity_description: SensorEntityDescription,
-    ) -> None:
-        """Initialize the sensor class."""
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "USD"
+    _attr_icon = "mdi:chart-line"
+    _attr_has_entity_name = True
+
+    def __init__(self, coordinator: FinnhubCoordinator, symbol: str) -> None:
         super().__init__(coordinator)
-        self.entity_description = entity_description
+        self._symbol = symbol.upper()
+        self._attr_unique_id = f"{DOMAIN}_{self._symbol.lower()}"
+        self._attr_name = self._symbol
 
     @property
-    def native_value(self) -> str | None:
-        """Return the native value of the sensor."""
-        return self.coordinator.data.get("body")
+    def native_value(self) -> float | None:
+        """Current price (field 'c' in Finnhub quote response)."""
+        return self._quote.get("c") or None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        q = self._quote
+        return {
+            ATTR_SYMBOL: self._symbol,
+            ATTR_OPEN: q.get("o"),
+            ATTR_HIGH: q.get("h"),
+            ATTR_LOW: q.get("l"),
+            ATTR_PREVIOUS_CLOSE: q.get("pc"),
+            ATTR_CHANGE: q.get("d"),
+            ATTR_CHANGE_PERCENT: q.get("dp"),
+        }
+
+    @property
+    def available(self) -> bool:
+        """Mark unavailable if coordinator has no data for this symbol."""
+        return (
+            super().available
+            and self.coordinator.data is not None
+            and self._symbol in self.coordinator.data
+            and bool(self._quote.get("c"))
+        )
+
+    @property
+    def _quote(self) -> dict:
+        if self.coordinator.data:
+            return self.coordinator.data.get(self._symbol, {})
+        return {}

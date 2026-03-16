@@ -1,8 +1,24 @@
-"""Constants for integration_blueprint."""
+"""Constants for the Finnhub integration."""
 
-from logging import Logger, getLogger
+DOMAIN = "finnhub"
 
-LOGGER: Logger = getLogger(__package__)
+CONF_SYMBOLS = "symbols"
 
-DOMAIN = "integration_blueprint"
-ATTRIBUTION = "Data provided by http://jsonplaceholder.typicode.com/"
+# FINNHUB_QUOTE_URL = "https://finnhub.io/api/v1/quote"
+FINNHUB_QUOTE_URL = "http://127.0.0.1:5000/api/v1/quote"
+
+
+# Rate limiter: stay under 60/min with a safety buffer
+RATE_LIMIT_CALLS = 55
+RATE_LIMIT_PERIOD = 60.0
+
+# Default polling interval in seconds (recalculated dynamically per symbol count)
+DEFAULT_SCAN_INTERVAL_SECONDS = 60
+
+ATTR_OPEN = "open"
+ATTR_HIGH = "high"
+ATTR_LOW = "low"
+ATTR_PREVIOUS_CLOSE = "previous_close"
+ATTR_CHANGE = "change"
+ATTR_CHANGE_PERCENT = "change_percent"
+ATTR_SYMBOL = "symbol"

@@ -1,12 +1,12 @@
 {
-  "domain": "integration_blueprint",
-  "name": "Integration blueprint",
-  "codeowners": [
-    "@ludeeus"
-  ],
-  "config_flow": true,
-  "documentation": "https://github.com/ludeeus/integration_blueprint",
+  "domain": "finnhub",
+  "name": "Finnhub Stock Quotes",
+  "version": "1.0.0",
+  "documentation": "https://finnhub.io/docs/api",
+  "requirements": [],
+  "dependencies": [],
+  "codeowners": [],
   "iot_class": "cloud_polling",
-  "issue_tracker": "https://github.com/ludeeus/integration_blueprint/issues",
-  "version": "0.1.0"
+  "config_flow": true,
+  "integration_type": "service"
 }

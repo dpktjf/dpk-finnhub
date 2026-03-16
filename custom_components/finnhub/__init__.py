@@ -1,78 +1,52 @@
-"""
-Custom integration to integrate integration_blueprint with Home Assistant.
-
-For more details about this integration, please refer to
-https://github.com/ludeeus/integration_blueprint
-"""
-
+"""Finnhub Stock Quotes integration."""
 from __future__ import annotations
 
-from datetime import timedelta
-from typing import TYPE_CHECKING
+import logging
 
-from homeassistant.const import CONF_PASSWORD, CONF_USERNAME, Platform
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.loader import async_get_loaded_integration
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import CONF_API_KEY, Platform
+from homeassistant.core import HomeAssistant
 
-from .api import IntegrationBlueprintApiClient
-from .const import DOMAIN, LOGGER
-from .coordinator import BlueprintDataUpdateCoordinator
-from .data import IntegrationBlueprintData
+from .const import CONF_SYMBOLS, DOMAIN
+from .coordinator import FinnhubCoordinator
 
-if TYPE_CHECKING:
-    from homeassistant.core import HomeAssistant
+_LOGGER = logging.getLogger(__name__)
 
-    from .data import IntegrationBlueprintConfigEntry
-
-PLATFORMS: list[Platform] = [
-    Platform.SENSOR,
-    Platform.BINARY_SENSOR,
-    Platform.SWITCH,
-]
+PLATFORMS: list[Platform] = [Platform.SENSOR]
 
 
-# https://developers.home-assistant.io/docs/config_entries_index/#setting-up-an-entry
-async def async_setup_entry(
-    hass: HomeAssistant,
-    entry: IntegrationBlueprintConfigEntry,
-) -> bool:
-    """Set up this integration using UI."""
-    coordinator = BlueprintDataUpdateCoordinator(
-        hass=hass,
-        logger=LOGGER,
-        name=DOMAIN,
-        update_interval=timedelta(hours=1),
-    )
-    entry.runtime_data = IntegrationBlueprintData(
-        client=IntegrationBlueprintApiClient(
-            username=entry.data[CONF_USERNAME],
-            password=entry.data[CONF_PASSWORD],
-            session=async_get_clientsession(hass),
-        ),
-        integration=async_get_loaded_integration(hass, entry.domain),
-        coordinator=coordinator,
-    )
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Set up Finnhub from a config entry."""
+    api_key: str = entry.data[CONF_API_KEY]
+    symbols: list[str] = entry.data[CONF_SYMBOLS]
 
-    # https://developers.home-assistant.io/docs/integration_fetching_data#coordinated-single-api-poll-for-data-for-all-entities
+    coordinator = FinnhubCoordinator(hass, api_key=api_key, symbols=symbols)
     await coordinator.async_config_entry_first_refresh()
 
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    entry.async_on_unload(entry.add_update_listener(async_reload_entry))
+
+    # Listen for options/data updates so live edits take effect without restart
+    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
     return True
 
 
-async def async_unload_entry(
-    hass: HomeAssistant,
-    entry: IntegrationBlueprintConfigEntry,
-) -> bool:
-    """Handle removal of an entry."""
-    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-
-
-async def async_reload_entry(
-    hass: HomeAssistant,
-    entry: IntegrationBlueprintConfigEntry,
-) -> None:
-    """Reload config entry."""
+async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Handle config entry updates (options flow saves)."""
+    coordinator: FinnhubCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.update_config(
+        api_key=entry.data[CONF_API_KEY],
+        symbols=entry.data[CONF_SYMBOLS],
+    )
+    # Reload platform so sensor entities are added/removed as needed
     await hass.config_entries.async_reload(entry.entry_id)
+
+
+async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Unload a config entry."""
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if unload_ok:
+        hass.data[DOMAIN].pop(entry.entry_id, None)
+    return unload_ok
