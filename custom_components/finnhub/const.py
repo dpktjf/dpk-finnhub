@@ -11,6 +11,8 @@ FINNHUB_QUOTE_URL = "http://127.0.0.1:5000/api/v1/quote"
 # Rate limiter: stay under 60/min with a safety buffer
 RATE_LIMIT_CALLS = 55
 RATE_LIMIT_PERIOD = 60.0
+RATE_LIMIT_BURST = 28
+RATE_LIMIT_BURST_PERIOD = 1.0
 
 # Default polling interval in seconds (recalculated dynamically per symbol count)
 DEFAULT_SCAN_INTERVAL_SECONDS = 60

@@ -16,6 +16,8 @@ from .const import (
     FINNHUB_QUOTE_URL,
     RATE_LIMIT_CALLS,
     RATE_LIMIT_PERIOD,
+    RATE_LIMIT_BURST,
+    RATE_LIMIT_BURST_PERIOD,
 )
 from .rate_limiter import RateLimiter
 
@@ -45,7 +47,10 @@ class FinnhubCoordinator(DataUpdateCoordinator[dict[str, dict]]):
         self.api_key = api_key
         self.symbols = [s.upper().strip() for s in symbols if s.strip()]
         self._rate_limiter = RateLimiter(
-            max_calls=RATE_LIMIT_CALLS, period=RATE_LIMIT_PERIOD
+            max_calls=RATE_LIMIT_CALLS,
+            period=RATE_LIMIT_PERIOD,
+            max_burst=RATE_LIMIT_BURST,
+            burst_period=RATE_LIMIT_BURST_PERIOD,
         )
 
         scan_interval = _safe_scan_interval(len(self.symbols))
@@ -75,6 +80,7 @@ class FinnhubCoordinator(DataUpdateCoordinator[dict[str, dict]]):
 
         for symbol in self.symbols:
             await self._rate_limiter.acquire()
+            _LOGGER.debug("Fetching quote for %s (rate limiter passed)", symbol)
             try:
                 async with session.get(
                     FINNHUB_QUOTE_URL,
