@@ -1,8 +1,37 @@
 import random
+import stat
 import time
 from flask import Flask, jsonify, request
 
 app = Flask(__name__)
+
+# --- Market status state: "open" | "closed" | "holiday" ---
+market_state = "open"
+
+stat_open = {
+    "exchange": "US",
+    "holiday": "",
+    "isOpen": True,
+    "session": "regular",
+    "t": int(time.time()),
+    "timezone": "America/New_York",
+}
+stat_closed = {
+    "exchange": "US",
+    "holiday": "",
+    "isOpen": False,
+    "session": "pre-market",
+    "t": int(time.time()),
+    "timezone": "America/New_York",
+}
+stat_holiday = {
+    "exchange": "US",
+    "holiday": "Christmas",
+    "isOpen": False,
+    "session": "",
+    "t": int(time.time()),
+    "timezone": "America/New_York",
+}
 
 
 @app.route("/api/v1/quote")
@@ -28,6 +57,41 @@ def quote():
     }
 
     return jsonify(data)
+
+
+@app.route("/api/v1/status/open", methods=["GET", "POST"])
+def status_open():
+    global market_state, stat_open
+    market_state = "open"
+    return jsonify(stat_open)
+
+
+@app.route("/api/v1/status/close", methods=["GET", "POST"])
+def status_close():
+    global market_state, stat_closed
+    market_state = "closed"
+    return jsonify(stat_closed)
+
+
+@app.route("/api/v1/status/holiday", methods=["GET", "POST"])
+def status_holiday():
+    global market_state, stat_holiday
+    market_state = "holiday"
+    return jsonify(stat_holiday)
+
+
+@app.route("/api/v1/stock/market-status")
+def status():
+    market = request.args.get("market", "US")
+    global market_state, stat_holiday, stat_closed, stat_open
+    if market_state == "open":
+        return jsonify(stat_open)
+    elif market_state == "closed":
+        return jsonify(stat_closed)
+    elif market_state == "holiday":
+        return jsonify(stat_holiday)
+    else:
+        return jsonify(stat_open)
 
 
 if __name__ == "__main__":

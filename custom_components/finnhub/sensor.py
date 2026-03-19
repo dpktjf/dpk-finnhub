@@ -1,13 +1,16 @@
 """Sensor platform for Finnhub Stock Quotes."""
+
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
-from homeassistant.components.sensor import SensorEntity, SensorStateClass
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_API_KEY
-from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.components.sensor import (
+    SensorEntity,
+    SensorStateClass,
+)
+from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
+from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
@@ -23,6 +26,13 @@ from .const import (
 )
 from .coordinator import FinnhubCoordinator
 
+if TYPE_CHECKING:
+    from homeassistant.config_entries import ConfigEntry
+    from homeassistant.core import HomeAssistant
+    from homeassistant.helpers.entity_platform import AddEntitiesCallback
+
+    from .api import QuoteResult
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -35,34 +45,75 @@ async def async_setup_entry(
     coordinator: FinnhubCoordinator = hass.data[DOMAIN][entry.entry_id]
     symbols: list[str] = entry.data[CONF_SYMBOLS]
 
-    async_add_entities(
+    entities: list[SensorEntity] = [
         FinnhubQuoteSensor(coordinator, symbol) for symbol in symbols
-    )
+    ]
+    entities.append(FinnhubHealthSensor(coordinator))
+    async_add_entities(entities)
 
 
-class FinnhubQuoteSensor(CoordinatorEntity[FinnhubCoordinator], SensorEntity):
+_EMPTY_QUOTE: QuoteResult = {
+    "c": 0.0,
+    "o": 0.0,
+    "h": 0.0,
+    "l": 0.0,
+    "pc": 0.0,
+    "d": 0.0,
+    "dp": 0.0,
+    "t": 0,
+}
+_DEVICE_INFO = DeviceInfo(
+    identifiers={(DOMAIN, "finnhub")},
+    name="Finnhub",
+    manufacturer="Finnhub.io",
+    model="Stock Quote API",
+    entry_type=DeviceEntryType.SERVICE,
+)
+
+
+class FinnhubQuoteSensor(
+    CoordinatorEntity[FinnhubCoordinator], SensorEntity, RestoreEntity
+):
     """A sensor representing the current price of a single equity symbol."""
 
     _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_device_info = _DEVICE_INFO
     _attr_native_unit_of_measurement = "USD"
     _attr_icon = "mdi:chart-line"
-    _attr_has_entity_name = True
+    _attr_has_entity_name = False
+    _last_known_value: float | None = None
+    _last_known_attributes: dict = {}
 
     def __init__(self, coordinator: FinnhubCoordinator, symbol: str) -> None:
         super().__init__(coordinator)
         self._symbol = symbol.upper()
         self._attr_unique_id = f"{DOMAIN}_{self._symbol.lower()}"
         self._attr_name = self._symbol
+        self.entity_id = f"sensor.market_{self._symbol.lower()}"
+
+    async def async_added_to_hass(self) -> None:
+        """Restore last known state on HA restart."""
+        await super().async_added_to_hass()
+        if (last_state := await self.async_get_last_state()) is not None:
+            try:
+                self._last_known_value = float(last_state.state)
+                self._last_known_attributes = dict(last_state.attributes)
+            except (ValueError, TypeError):
+                pass
 
     @property
     def native_value(self) -> float | None:
-        """Current price (field 'c' in Finnhub quote response)."""
-        return self._quote.get("c") or None
+        """Return live price during market hours, last known price outside."""
+        live = self._quote.get("c")
+        if live:
+            self._last_known_value = float(live)
+            return self._last_known_value
+        return self._last_known_value
 
     @property
     def extra_state_attributes(self) -> dict:
         q = self._quote
-        return {
+        attrs = {
             ATTR_SYMBOL: self._symbol,
             ATTR_OPEN: q.get("o"),
             ATTR_HIGH: q.get("h"),
@@ -71,19 +122,67 @@ class FinnhubQuoteSensor(CoordinatorEntity[FinnhubCoordinator], SensorEntity):
             ATTR_CHANGE: q.get("d"),
             ATTR_CHANGE_PERCENT: q.get("dp"),
         }
+        # Merge in last known values for any keys that are currently None
+        # (coordinator returns cached data outside hours, but on first boot
+        # before any live fetch the quote may be empty)
+        if not any(v for k, v in attrs.items() if k != ATTR_SYMBOL):
+            return self._last_known_attributes or attrs
+        self._last_known_attributes = attrs
+        return attrs
 
     @property
     def available(self) -> bool:
-        """Mark unavailable if coordinator has no data for this symbol."""
-        return (
-            super().available
-            and self.coordinator.data is not None
-            and self._symbol in self.coordinator.data
-            and bool(self._quote.get("c"))
+        """Available if we have any price data — live or cached."""
+        return super().available and (
+            bool(self._quote.get("c")) or self._last_known_value is not None
         )
 
     @property
-    def _quote(self) -> dict:
+    def _quote(self) -> QuoteResult:
         if self.coordinator.data:
-            return self.coordinator.data.get(self._symbol, {})
-        return {}
+            return self.coordinator.data.get(self._symbol, _EMPTY_QUOTE)
+        return _EMPTY_QUOTE
+
+
+class FinnhubHealthSensor(CoordinatorEntity[FinnhubCoordinator], SensorEntity):
+    """Coordinator health — exposes last fetch time, error count, and status."""
+
+    _attr_icon = "mdi:heart-pulse"
+    _attr_device_info = _DEVICE_INFO
+    _attr_has_entity_name = False
+    _attr_name = "finnhub_health"
+    _attr_unique_id = f"{DOMAIN}_health"
+
+    @property
+    def native_value(self) -> str:
+        """Overall status string — ok, degraded, or error."""
+        if not self.coordinator.last_update_success:
+            return "error"
+        if self._missing_symbols:
+            return "degraded"
+        return "ok"
+
+    @property
+    def extra_state_attributes(self) -> dict:
+
+        last_success = getattr(self.coordinator, "last_update_success_time", None)
+        return {
+            "last_update_success": self.coordinator.last_update_success,
+            "last_successful_fetch": last_success.isoformat() if last_success else None,
+            "symbols_tracked": len(self.coordinator.symbols),
+            "symbols_missing": self._missing_symbols,
+            "update_interval_seconds": (
+                int(self.coordinator.update_interval.total_seconds())
+                if self.coordinator.update_interval
+                else None
+            ),
+            "trading_today": self.coordinator._trading_today,
+            "market_session_active": self.coordinator.update_interval is not None,
+        }
+
+    @property
+    def _missing_symbols(self) -> list[str]:
+        """Symbols that are tracked but absent from the last fetch result."""
+        if not self.coordinator.data:
+            return list(self.coordinator.symbols)
+        return [s for s in self.coordinator.symbols if s not in self.coordinator.data]
