@@ -7,14 +7,12 @@ frozen datetime values injected via monkeypatch.
 Run with:
     pytest tests/test_market_hours_standalone.py -v
 """
+# ruff: noqa
 
 from __future__ import annotations
 
-import math
-from datetime import date, datetime, time, timedelta
+from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
-
-import pytest
 
 # ---------------------------------------------------------------------------
 # Inline copies of production constants and logic — no HA imports needed
@@ -42,10 +40,7 @@ def is_market_open(now_utc: datetime, status_override: dict | None = None) -> bo
     or leave None to exercise the local fallback path.
     """
     if status_override is not None:
-        return (
-            status_override.get("isOpen", False)
-            and status_override.get("session") == "regular"
-        )
+        return status_override.get("isOpen", False) and status_override.get("session") == "regular"
     now = _now_et(now_utc)
     if now.weekday() not in MARKET_DAYS:
         return False
@@ -89,29 +84,36 @@ def utc(year: int, month: int, day: int, hour: int, minute: int = 0) -> datetime
 
 
 class TestMarketOpenBoundaries:
-    def test_exactly_at_open_is_open(self):
+    def test_exactly_at_open_is_open(self) -> None:
+        """09:30:00 is the start of the session — should be open."""
         assert is_market_open(et(2026, 3, 16, 9, 30)) is True
 
-    def test_one_minute_before_open_is_closed(self):
+    def test_one_minute_before_open_is_closed(self) -> None:
+        """09:29:00 is before the session starts — should be closed."""
         assert is_market_open(et(2026, 3, 16, 9, 29)) is False
 
-    def test_midday_is_open(self):
+    def test_midday_is_open(self) -> None:
+        """12:00:00 is during the session — should be open."""
         assert is_market_open(et(2026, 3, 16, 12, 0)) is True
 
-    def test_exactly_at_close_is_open(self):
+    def test_exactly_at_close_is_open(self) -> None:
         """16:00:00 is still within the session."""
         assert is_market_open(et(2026, 3, 16, 16, 0)) is True
 
-    def test_one_minute_after_close_is_closed(self):
+    def test_one_minute_after_close_is_closed(self) -> None:
+        """16:01:00 is after the session ends — should be closed."""
         assert is_market_open(et(2026, 3, 16, 16, 1)) is False
 
-    def test_midnight_is_closed(self):
+    def test_midnight_is_closed(self) -> None:
+        """00:00:00 is outside the session hours — should be closed."""
         assert is_market_open(et(2026, 3, 16, 0, 0)) is False
 
-    def test_pre_market_is_closed(self):
+    def test_pre_market_is_closed(self) -> None:
+        """08:00:00 is before the session starts — should be closed."""
         assert is_market_open(et(2026, 3, 16, 8, 0)) is False
 
-    def test_post_market_is_closed(self):
+    def test_post_market_is_closed(self) -> None:
+        """17:00:00 is after the session ends — should be closed."""
         assert is_market_open(et(2026, 3, 16, 17, 0)) is False
 
 
@@ -123,30 +125,37 @@ class TestMarketOpenBoundaries:
 class TestWeekdays:
     """2026-03-16 is a Monday — use offsets to hit each day."""
 
-    def test_monday_is_open(self):
-        assert is_market_open(et(2026, 3, 16, 10, 0)) is True
+    def test_monday_is_open(self) -> None:
+        """Monday 10:00 is during session hours — should be open."""
+        assert is_market_open(et(2026, 3, 16, 10, 0)) is True  # noqa: S101
 
-    def test_tuesday_is_open(self):
+    def test_tuesday_is_open(self) -> None:
+        """Tuesday 10:00 is during session hours — should be open."""
         assert is_market_open(et(2026, 3, 17, 10, 0)) is True
 
-    def test_wednesday_is_open(self):
+    def test_wednesday_is_open(self) -> None:
+        """Wednesday 10:00 is during session hours — should be open."""
         assert is_market_open(et(2026, 3, 18, 10, 0)) is True
 
-    def test_thursday_is_open(self):
+    def test_thursday_is_open(self) -> None:
+        """Thursday 10:00 is during session hours — should be open."""
         assert is_market_open(et(2026, 3, 19, 10, 0)) is True
 
-    def test_friday_is_open(self):
+    def test_friday_is_open(self) -> None:
+        """Friday 10:00 is during session hours — should be open."""
         assert is_market_open(et(2026, 3, 20, 10, 0)) is True
 
-    def test_saturday_is_closed(self):
+    def test_saturday_is_closed(self) -> None:
+        """Saturday 10:00 is during session hours but weekend — should be closed."""
         assert is_market_open(et(2026, 3, 21, 10, 0)) is False
 
-    def test_sunday_is_closed(self):
+    def test_sunday_is_closed(self) -> None:
+        """Sunday 10:00 is during session hours but weekend — should be closed."""
         assert is_market_open(et(2026, 3, 22, 10, 0)) is False
 
-    def test_saturday_during_session_hours_is_closed(self):
+    def test_saturday_during_session_hours_is_closed(self) -> None:
         """Even if time falls in 09:30–16:00, weekend must be closed."""
-        assert is_market_open(et(2026, 3, 21, 12, 0)) is False
+        assert is_market_open(et(2026, 3, 21, 12, 0)) is False  # noqa: S101
 
 
 # ---------------------------------------------------------------------------
