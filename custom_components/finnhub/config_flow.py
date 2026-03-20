@@ -1,4 +1,5 @@
 """Config flow and options flow for Finnhub integration."""
+
 from __future__ import annotations
 
 import logging
@@ -6,8 +7,12 @@ from typing import Any
 
 import aiohttp
 import voluptuous as vol
-
-from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult, OptionsFlow
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigFlow,
+    ConfigFlowResult,
+    OptionsFlow,
+)
 from homeassistant.const import CONF_API_KEY
 from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -20,9 +25,11 @@ _LOGGER = logging.getLogger(__name__)
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _parse_symbols(raw: str) -> list[str]:
     """Split a comma/space/newline-separated string into a clean symbol list."""
     import re
+
     tokens = re.split(r"[\s,;]+", raw.upper())
     return [t.strip() for t in tokens if t.strip()]
 
@@ -55,6 +62,7 @@ async def _validate_api_key(hass, api_key: str) -> str | None:
 # ---------------------------------------------------------------------------
 # Config flow (initial setup)
 # ---------------------------------------------------------------------------
+
 
 class FinnhubConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle initial configuration via the UI."""
@@ -94,11 +102,21 @@ class FinnhubConfigFlow(ConfigFlow, domain=DOMAIN):
             {
                 vol.Required(
                     CONF_API_KEY,
-                    description={"suggested_value": user_input.get(CONF_API_KEY, "") if user_input else ""},
+                    description={
+                        "suggested_value": user_input.get(CONF_API_KEY, "")
+                        if user_input
+                        else ""
+                    },
                 ): str,
                 vol.Required(
                     CONF_SYMBOLS,
-                    description={"suggested_value": user_input.get(CONF_SYMBOLS, "AAPL, MSFT, GOOGL") if user_input else "AAPL, MSFT, GOOGL"},
+                    description={
+                        "suggested_value": user_input.get(
+                            CONF_SYMBOLS, "AAPL, MSFT, GOOGL"
+                        )
+                        if user_input
+                        else "AAPL, MSFT, GOOGL"
+                    },
                 ): str,
             }
         )
@@ -117,10 +135,52 @@ class FinnhubConfigFlow(ConfigFlow, domain=DOMAIN):
     def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
         return FinnhubOptionsFlow()
 
+    async def async_step_reauth(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Handle re-authentication when the API key is rejected."""
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            api_key: str = user_input[CONF_API_KEY].strip()
+            error = await _validate_api_key(self.hass, api_key)
+            if error:
+                errors["base"] = error
+            else:
+                # Update the existing entry with the new key, preserving symbols
+                self.hass.config_entries.async_update_entry(
+                    self._get_reauth_entry(),
+                    data={
+                        **self._get_reauth_entry().data,
+                        CONF_API_KEY: api_key,
+                    },
+                )
+                await self.hass.config_entries.async_reload(
+                    self._get_reauth_entry().entry_id
+                )
+                return self.async_abort(reason="reauth_successful")
+
+        schema = vol.Schema({vol.Required(CONF_API_KEY): str})
+
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=schema,
+            errors=errors,
+            description_placeholders={
+                "integration_name": "Finnhub",
+            },
+        )
+
 
 # ---------------------------------------------------------------------------
 # Options flow (reconfigure after setup)
 # ---------------------------------------------------------------------------
+
 
 class FinnhubOptionsFlow(OptionsFlow):
     """Allow editing API key and symbols after initial setup."""

@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import logging
 import math
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_track_point_in_time
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -133,6 +134,8 @@ class FinnhubCoordinator(DataUpdateCoordinator[dict[str, QuoteResult]]):
             _LOGGER.debug("Finnhub: returning cached market status")
             return self._market_status
 
+        # FinnhubApiError (e.g. 401) must propagate up to _async_update_data
+        # so ConfigEntryAuthFailed can be raised and polling halted
         data = await self._get_client().get_market_status()
         if data is not None:
             self._market_status = data
@@ -222,7 +225,14 @@ class FinnhubCoordinator(DataUpdateCoordinator[dict[str, QuoteResult]]):
 
     async def _async_update_data(self) -> dict[str, QuoteResult]:
         """Fetch all symbol quotes, respecting the rate limit."""
-        if not await self._is_market_open():
+        try:
+            market_open = await self._is_market_open()
+        except FinnhubApiError as err:
+            if "401" in str(err):
+                raise ConfigEntryAuthFailed(str(err)) from err
+            raise UpdateFailed(str(err)) from err
+
+        if not market_open:
             _LOGGER.debug(
                 "Finnhub: outside market hours — pausing polling until %s",
                 next_market_open(),
@@ -251,6 +261,8 @@ class FinnhubCoordinator(DataUpdateCoordinator[dict[str, QuoteResult]]):
                 if quote is not None:
                     results[symbol] = quote
             except FinnhubApiError as err:
+                if "401" in str(err):
+                    raise ConfigEntryAuthFailed(str(err)) from err
                 raise UpdateFailed(str(err)) from err
 
         self.last_update_success_time = dt_util.now()

@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from collections import deque
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class RateLimiter:
@@ -43,6 +46,7 @@ class RateLimiter:
             if len(self._calls) >= self.max_calls:
                 # Wait until the oldest call exits the window
                 sleep_for = self.period - (now - self._calls[0])
+                _LOGGER.debug("Minute rate trip; pause %f s", sleep_for)
                 await asyncio.sleep(sleep_for)
 
                 # Re-prune after sleeping
@@ -56,6 +60,7 @@ class RateLimiter:
 
             if len(self._burst) >= self.max_burst:
                 sleep_for = self.burst_period - (now - self._burst[0])
+                _LOGGER.debug("Burst rate trip; pause %f s", sleep_for)
                 await asyncio.sleep(sleep_for)
                 now = time.monotonic()
                 while self._burst and now - self._burst[0] >= self.burst_period:

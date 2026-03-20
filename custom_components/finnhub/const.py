@@ -20,7 +20,7 @@ MARKET_TIMEZONE = "America/New_York"
 # MARKET_OPEN = time(9, 30)
 # MARKET_CLOSE = time(16, 0)
 MARKET_OPEN = time(2, 39)
-MARKET_CLOSE = time(3, 55)
+MARKET_CLOSE = time(5, 55)
 MARKET_DAYS = frozenset({0, 1, 2, 3, 4})  # Monday=0 … Friday=4
 MARKET_EXCHANGE = "US"
 
@@ -28,9 +28,9 @@ MARKET_EXCHANGE = "US"
 MARKET_STATUS_CACHE_SECONDS = 60
 
 # Rate limiter: stay under 60/min with a safety buffer
-RATE_LIMIT_CALLS = 55
+RATE_LIMIT_CALLS = 50  # max 60 calls at source
 RATE_LIMIT_PERIOD = 60.0
-RATE_LIMIT_BURST = 28
+RATE_LIMIT_BURST = 10  # max 30 calls at source
 RATE_LIMIT_BURST_PERIOD = 1.0
 
 # Default polling interval in seconds (recalculated dynamically per symbol count)

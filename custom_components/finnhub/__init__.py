@@ -29,13 +29,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     coordinator = FinnhubCoordinator(hass, api_key=api_key, symbols=symbols)
 
-    # Lightweight auth check — one call only, does not fetch all symbols
-    client = FinnhubClient(async_get_clientsession(hass), api_key)
-    try:
-        await client.get_market_status()
-    except Exception:
-        raise ConfigEntryNotReady("Finnhub unreachable at startup")
-
     # Schedule the first fetch in the background so HA startup is not
     # blocked. Sensors will show unavailable briefly until the first
     # successful update completes.

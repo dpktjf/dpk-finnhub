@@ -48,7 +48,8 @@ class FinnhubClient:
         self._api_key = api_key
 
     async def get_quote(self, symbol: str) -> QuoteResult | None:
-        """Fetch a single equity quote.
+        """
+        Fetch a single equity quote.
 
         Returns None if the symbol is unknown or returns empty data.
         Raises FinnhubApiError on authentication or rate-limit failures.
@@ -86,7 +87,8 @@ class FinnhubClient:
             return None
 
     async def get_market_status(self) -> MarketStatus | None:
-        """Fetch current US market status.
+        """
+        Fetch current US market status.
 
         Returns None on any failure — callers should fall back to local
         time-based check when this returns None.
@@ -97,6 +99,8 @@ class FinnhubClient:
                 params={"exchange": MARKET_EXCHANGE, "token": self._api_key},
                 timeout=aiohttp.ClientTimeout(total=10),
             ) as resp:
+                if resp.status == 401:
+                    raise FinnhubApiError("API key rejected by Finnhub (HTTP 401)")
                 resp.raise_for_status()
                 data: MarketStatus = await resp.json()
                 _LOGGER.debug(
@@ -106,6 +110,8 @@ class FinnhubClient:
                     data.get("holiday"),
                 )
                 return data
+        except FinnhubApiError:
+            raise
         except aiohttp.ClientError as err:
             _LOGGER.warning("Finnhub: could not fetch market status: %s", err)
             return None
