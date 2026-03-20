@@ -8,7 +8,7 @@ From earlier in our conversation, the remaining recommended enhancements in prio
 **Observability**
 4. **`async_get_config_entry_diagnostics()`** — one function in `__init__.py`, adds a **Download Diagnostics** button in the UI that dumps coordinator state with the API key redacted. Very low effort.
 5. **DONE** **Rate limiter sensor** — expose calls used in current minute/burst windows as a diagnostic sensor. Useful with large symbol lists.
-6. **Stale data indicator** — add `data_as_of` attribute to each quote sensor using the Finnhub `t` timestamp field. Surfaces when a ticker is returning stale data.
+6. **DONE** **Stale data indicator** — add `data_as_of` attribute to each quote sensor using the Finnhub `t` timestamp field. Surfaces when a ticker is returning stale data.
 
 **User experience**
 7. **Currency support** — fetch currency from `/stock/profile2` once at setup and use it as `native_unit_of_measurement` instead of hardcoded USD. Needed for LSE, TSX, and other non-USD symbols.
