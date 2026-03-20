@@ -1,3 +1,5 @@
+# ruff: noqa no lint...
+
 import random
 import stat
 import time
