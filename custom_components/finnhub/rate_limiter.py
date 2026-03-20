@@ -26,6 +26,7 @@ class RateLimiter:
         max_burst: int = 28,
         burst_period: float = 1.0,
     ) -> None:
+        """Initialize the rate limiter with specified limits and periods."""
         self.max_calls = max_calls
         self.period = period
         self.max_burst = max_burst
@@ -85,8 +86,10 @@ class RateLimiter:
 
     @property
     def minute_window_capacity(self) -> int:
+        """Maximum calls allowed in the 60s window."""
         return self.max_calls
 
     @property
     def burst_window_capacity(self) -> int:
+        """Maximum calls allowed in the 1s burst window."""
         return self.max_burst

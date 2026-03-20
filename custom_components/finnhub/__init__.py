@@ -6,10 +6,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from homeassistant.const import CONF_API_KEY, Platform
-from homeassistant.exceptions import ConfigEntryNotReady
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .api import FinnhubClient
 from .const import CONF_SYMBOLS, DOMAIN
 from .coordinator import FinnhubCoordinator
 

@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone, UTC
-from typing import TYPE_CHECKING
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.sensor import (
     SensorEntity,
@@ -49,9 +49,7 @@ async def async_setup_entry(
     coordinator: FinnhubCoordinator = hass.data[DOMAIN][entry.entry_id]
     symbols: list[str] = entry.data[CONF_SYMBOLS]
 
-    entities: list[SensorEntity] = [
-        FinnhubQuoteSensor(coordinator, symbol) for symbol in symbols
-    ]
+    entities: list[SensorEntity] = [FinnhubQuoteSensor(coordinator, symbol) for symbol in symbols]
     entities.append(FinnhubHealthSensor(coordinator))
     entities.append(FinnhubRateLimiterSensor(coordinator))
     async_add_entities(entities)
@@ -76,9 +74,7 @@ _DEVICE_INFO = DeviceInfo(
 )
 
 
-class FinnhubQuoteSensor(
-    CoordinatorEntity[FinnhubCoordinator], SensorEntity, RestoreEntity
-):
+class FinnhubQuoteSensor(CoordinatorEntity[FinnhubCoordinator], SensorEntity, RestoreEntity):
     """A sensor representing the current price of a single equity symbol."""
 
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -86,15 +82,16 @@ class FinnhubQuoteSensor(
     _attr_native_unit_of_measurement = "USD"
     _attr_icon = "mdi:chart-line"
     _attr_has_entity_name = False
-    _last_known_value: float | None = None
-    _last_known_attributes: dict = {}
 
     def __init__(self, coordinator: FinnhubCoordinator, symbol: str) -> None:
+        """Initialize the sensor."""
         super().__init__(coordinator)
         self._symbol = symbol.upper()
         self._attr_unique_id = f"{DOMAIN}_{self._symbol.lower()}"
         self._attr_name = self._symbol
         self.entity_id = f"sensor.market_{self._symbol.lower()}"
+        self._last_known_value: float | None = None
+        self._last_known_attributes: dict[str, Any] = {}
 
     async def async_added_to_hass(self) -> None:
         """Restore last known state on HA restart."""
@@ -117,11 +114,10 @@ class FinnhubQuoteSensor(
 
     @property
     def extra_state_attributes(self) -> dict:
+        """Return quote attributes, merging live data with last known values."""
         q = self._quote
         raw_ts = q.get("t")
-        data_as_of = (
-            datetime.fromtimestamp(raw_ts, tz=UTC).isoformat() if raw_ts else None
-        )
+        data_as_of = datetime.fromtimestamp(raw_ts, tz=UTC).isoformat() if raw_ts else None
         attrs = {
             ATTR_SYMBOL: self._symbol,
             ATTR_OPEN: q.get("o"),
@@ -144,9 +140,7 @@ class FinnhubQuoteSensor(
     @property
     def available(self) -> bool:
         """Available if we have any price data — live or cached."""
-        return super().available and (
-            bool(self._quote.get("c")) or self._last_known_value is not None
-        )
+        return super().available and (bool(self._quote.get("c")) or self._last_known_value is not None)
 
     @property
     def _quote(self) -> QuoteResult:
@@ -188,21 +182,18 @@ class FinnhubHealthSensor(CoordinatorEntity[FinnhubCoordinator], SensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict:
-
+        """Diagnostic attributes about the coordinator's health and activity."""
         last_success = getattr(self.coordinator, "last_update_success_time", None)
         return {
             "last_update_success": self.coordinator.last_update_success,
             "last_successful_fetch": last_success.isoformat() if last_success else None,
             "symbols_tracked": len(self.coordinator.symbols),
             "symbols_failed": self.coordinator.failed_symbols,
-            "symbols_ok": len(self.coordinator.symbols)
-            - len(self.coordinator.failed_symbols),
+            "symbols_ok": len(self.coordinator.symbols) - len(self.coordinator.failed_symbols),
             "update_interval_seconds": (
-                int(self.coordinator.update_interval.total_seconds())
-                if self.coordinator.update_interval
-                else None
+                int(self.coordinator.update_interval.total_seconds()) if self.coordinator.update_interval else None
             ),
-            "trading_today": self.coordinator._trading_today,
+            "trading_today": self.coordinator.trading_today,
             "market_session_active": self.coordinator.update_interval is not None,
         }
 
@@ -219,24 +210,24 @@ class FinnhubRateLimiterSensor(CoordinatorEntity[FinnhubCoordinator], SensorEnti
     @property
     def native_value(self) -> int:
         """Calls used in the current 60s window — primary at-a-glance value."""
-        return self.coordinator._rate_limiter.minute_window_used
+        return self.coordinator.rate_limiter.minute_window_used
 
     @property
     def native_unit_of_measurement(self) -> str:
+        """Calls in current window."""
         return "calls"
 
     @property
     def extra_state_attributes(self) -> dict:
-        rl = self.coordinator._rate_limiter
+        """Detailed breakdown of rate limiter usage and capacity."""
+        rl = self.coordinator.rate_limiter
         minute_used = rl.minute_window_used
         burst_used = rl.burst_window_used
         return {
             "minute_window_used": minute_used,
             "minute_window_capacity": rl.minute_window_capacity,
             "minute_window_remaining": rl.minute_window_capacity - minute_used,
-            "minute_window_pct": round(
-                minute_used / rl.minute_window_capacity * 100, 1
-            ),
+            "minute_window_pct": round(minute_used / rl.minute_window_capacity * 100, 1),
             "burst_window_used": burst_used,
             "burst_window_capacity": rl.burst_window_capacity,
             "burst_window_remaining": rl.burst_window_capacity - burst_used,

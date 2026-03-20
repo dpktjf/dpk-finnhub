@@ -5,24 +5,30 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
-from typing import TypedDict
+from http import HTTPStatus
+from typing import TYPE_CHECKING, Any, TypedDict, TypeVar
 
 import aiohttp
 
 from .const import (
+    FINNHUB_MARKET_STATUS_URL,
+    FINNHUB_QUOTE_URL,
+    MARKET_EXCHANGE,
     RETRY_ATTEMPTS,
     RETRY_BASE_DELAY,
     RETRY_JITTER,
     RETRY_MAX_DELAY,
-    FINNHUB_MARKET_STATUS_URL,
-    FINNHUB_QUOTE_URL,
-    MARKET_EXCHANGE,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Coroutine
 
 _LOGGER = logging.getLogger(__name__)
 
 
 class MarketStatus(TypedDict):
+    """Market status response fields — see finnhub api docs."""
+
     exchange: str
     holiday: str | None
     isOpen: bool
@@ -32,6 +38,8 @@ class MarketStatus(TypedDict):
 
 
 class QuoteResult(TypedDict):
+    """Quote response fields — see finnhub api docs."""
+
     c: float  # current price
     o: float  # open
     h: float  # high
@@ -46,7 +54,15 @@ class FinnhubApiError(Exception):
     """Raised when the Finnhub API returns an unrecoverable error."""
 
 
-async def _with_backoff(coro_fn, attempts: int, base_delay: float, max_delay: float):
+T = TypeVar("T")
+
+
+async def _with_backoff[T](
+    coro_fn: Callable[[], Coroutine[Any, Any, T]],
+    attempts: int,
+    base_delay: float,
+    max_delay: float,
+) -> T:
     """
     Retry an async callable with exponential backoff and jitter.
 
@@ -64,12 +80,12 @@ async def _with_backoff(coro_fn, attempts: int, base_delay: float, max_delay: fl
             return await coro_fn()
         except FinnhubApiError:
             raise  # never retry auth/rate errors
-        except Exception as err:
+        except Exception as err:  # noqa: BLE001
             last_err = err
             if attempt == attempts:
                 break
             delay = min(base_delay * (2 ** (attempt - 1)), max_delay)
-            jitter = delay * RETRY_JITTER * (2 * random.random() - 1)
+            jitter = delay * RETRY_JITTER * (2 * random.random() - 1)  # noqa: S311
             sleep_for = max(0.0, delay + jitter)
             _LOGGER.debug(
                 "Finnhub: attempt %d/%d failed (%s) — retrying in %.2fs",
@@ -83,13 +99,15 @@ async def _with_backoff(coro_fn, attempts: int, base_delay: float, max_delay: fl
     if last_err is not None:
         raise last_err
     # Should be unreachable — attempts must be >= 1
-    raise RuntimeError("_with_backoff called with zero attempts")
+    msg = "_with_backoff called with zero attempts"
+    raise RuntimeError(msg)
 
 
 class FinnhubClient:
     """Thin async wrapper around the Finnhub REST API."""
 
     def __init__(self, session: aiohttp.ClientSession, api_key: str) -> None:
+        """Initialize the client with an aiohttp session and API key."""
         self._session = session
         self._api_key = api_key
 
@@ -101,16 +119,19 @@ class FinnhubClient:
         Raises FinnhubApiError on authentication or rate-limit failures.
         """
 
-        async def _fetch():
+        async def _fetch() -> QuoteResult | None:
+            """Make the actual API call, with no retries or backoff."""
             async with self._session.get(
                 FINNHUB_QUOTE_URL,
                 params={"symbol": symbol, "token": self._api_key},
                 timeout=aiohttp.ClientTimeout(total=10),
             ) as resp:
-                if resp.status == 401:
-                    raise FinnhubApiError(f"API key rejected by Finnhub (HTTP 401)")
-                if resp.status == 429:
-                    raise FinnhubApiError("Rate limit exceeded (HTTP 429)")
+                if resp.status == HTTPStatus.UNAUTHORIZED:
+                    msg = "API key rejected by Finnhub (HTTP 401)"
+                    raise FinnhubApiError(msg)
+                if resp.status == HTTPStatus.TOO_MANY_REQUESTS:
+                    msg = "Rate limit exceeded (HTTP 429)"
+                    raise FinnhubApiError(msg)
                 resp.raise_for_status()
                 data: QuoteResult = await resp.json()
 
@@ -133,7 +154,7 @@ class FinnhubClient:
             )
         except FinnhubApiError:
             raise
-        except Exception as err:
+        except (aiohttp.ClientError, TimeoutError, ValueError) as err:
             _LOGGER.warning(
                 "Finnhub: all %d attempts failed for %s: %s",
                 RETRY_ATTEMPTS,
@@ -155,8 +176,9 @@ class FinnhubClient:
                 params={"exchange": MARKET_EXCHANGE, "token": self._api_key},
                 timeout=aiohttp.ClientTimeout(total=10),
             ) as resp:
-                if resp.status == 401:
-                    raise FinnhubApiError("API key rejected by Finnhub (HTTP 401)")
+                if resp.status == HTTPStatus.UNAUTHORIZED:
+                    msg = "API key rejected by Finnhub (HTTP 401)"
+                    raise FinnhubApiError(msg)  # noqa: TRY301
                 resp.raise_for_status()
                 data: MarketStatus = await resp.json()
                 _LOGGER.debug(
@@ -171,6 +193,6 @@ class FinnhubClient:
         except aiohttp.ClientError as err:
             _LOGGER.warning("Finnhub: could not fetch market status: %s", err)
             return None
-        except Exception as err:  # noqa: BLE001
+        except (TimeoutError, ValueError) as err:
             _LOGGER.warning("Finnhub: unexpected error fetching market status: %s", err)
             return None

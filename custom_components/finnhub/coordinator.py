@@ -8,6 +8,7 @@ from datetime import date, datetime, timedelta
 from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
+import aiohttp
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_track_point_in_time
@@ -56,9 +57,7 @@ def _safe_scan_interval(symbol_count: int) -> timedelta:
 def next_market_open() -> datetime:
     """Return the datetime of the next NYSE market open in UTC."""
     now = dt_util.now().astimezone(_TZ)
-    candidate = now.replace(
-        hour=MARKET_OPEN.hour, minute=MARKET_OPEN.minute, second=0, microsecond=0
-    )
+    candidate = now.replace(hour=MARKET_OPEN.hour, minute=MARKET_OPEN.minute, second=0, microsecond=0)
     # If we're already past open today, start from tomorrow
     if now >= candidate:
         candidate = candidate + timedelta(days=1)
@@ -77,6 +76,7 @@ class FinnhubCoordinator(DataUpdateCoordinator[dict[str, QuoteResult]]):
         api_key: str,
         symbols: list[str],
     ) -> None:
+        """Initialize the coordinator."""
         self.api_key = api_key
         self.symbols = [s.upper().strip() for s in symbols if s.strip()]
         self._rate_limiter = RateLimiter(
@@ -132,10 +132,7 @@ class FinnhubCoordinator(DataUpdateCoordinator[dict[str, QuoteResult]]):
     async def _fetch_market_status(self) -> MarketStatus | None:
         """Delegate to FinnhubClient with a short-lived cache."""
         now = dt_util.now().timestamp()
-        if (
-            self._market_status is not None
-            and now - self._market_status_fetched_at < MARKET_STATUS_CACHE_SECONDS
-        ):
+        if self._market_status is not None and now - self._market_status_fetched_at < MARKET_STATUS_CACHE_SECONDS:
             _LOGGER.debug("Finnhub: returning cached market status")
             return self._market_status
 
@@ -146,9 +143,7 @@ class FinnhubCoordinator(DataUpdateCoordinator[dict[str, QuoteResult]]):
             self._market_status = data
             self._market_status_fetched_at = now
         else:
-            _LOGGER.warning(
-                "Finnhub: market status unavailable, falling back to local time check"
-            )
+            _LOGGER.warning("Finnhub: market status unavailable, falling back to local time check")
         return data
 
     def _invalidate_daily_cache(self) -> None:
@@ -193,12 +188,8 @@ class FinnhubCoordinator(DataUpdateCoordinator[dict[str, QuoteResult]]):
         if status is not None:
             is_open = status.get("isOpen", False) and status.get("session") == "regular"
         else:
-            _LOGGER.warning(
-                "Finnhub: market status API unavailable, assuming market is open"
-            )
-            is_open = (
-                True  # optimistic fallback — better to poll than to miss a session
-            )
+            _LOGGER.warning("Finnhub: market status API unavailable, assuming market is open")
+            is_open = True  # optimistic fallback — better to poll than to miss a session
 
         self._trading_today = is_open
         self._trading_today_date = today
@@ -218,17 +209,15 @@ class FinnhubCoordinator(DataUpdateCoordinator[dict[str, QuoteResult]]):
         open_at = next_market_open()
         _LOGGER.debug("Finnhub: next market open scheduled for %s", open_at)
 
-        async def _on_market_open(now: datetime) -> None:
+        async def _on_market_open(now: datetime) -> None:  # noqa: ARG001
             self._unsub_market_open = None
             self._invalidate_daily_cache()
             _LOGGER.debug("Finnhub: market open — resuming polling")
             await self.async_refresh()
 
-        self._unsub_market_open = async_track_point_in_time(
-            self.hass, _on_market_open, open_at
-        )
+        self._unsub_market_open = async_track_point_in_time(self.hass, _on_market_open, open_at)
 
-    async def _async_update_data(self) -> dict[str, QuoteResult]:
+    async def _async_update_data(self) -> dict[str, QuoteResult]:  # noqa: PLR0912, PLR0915
         """Fetch all symbol quotes, respecting the rate limit."""
         try:
             market_open = await self._is_market_open()
@@ -272,7 +261,8 @@ class FinnhubCoordinator(DataUpdateCoordinator[dict[str, QuoteResult]]):
                 if "401" in str(err):
                     raise ConfigEntryAuthFailed(str(err)) from err
                 raise UpdateFailed(str(err)) from err
-            except Exception:
+            except (aiohttp.ClientError, TimeoutError, ValueError) as err:
+                _LOGGER.warning("Finnhub: unexpected error fetching quote for %s: %s", symbol, err)
                 failed.append(symbol)
 
         # Carry forward last known data for any symbols that failed this cycle
@@ -309,3 +299,13 @@ class FinnhubCoordinator(DataUpdateCoordinator[dict[str, QuoteResult]]):
         )
 
         return results
+
+    @property
+    def trading_today(self) -> bool | None:
+        """Whether the market is open today — None if not yet checked."""
+        return self._trading_today
+
+    @property
+    def rate_limiter(self) -> RateLimiter:
+        """The coordinator's RateLimiter instance, for diagnostic sensors."""
+        return self._rate_limiter
