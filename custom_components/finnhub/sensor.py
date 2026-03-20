@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone, UTC
 from typing import TYPE_CHECKING
 
 from homeassistant.components.sensor import (
@@ -17,6 +18,8 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import (
     ATTR_CHANGE,
     ATTR_CHANGE_PERCENT,
+    ATTR_DATA_AS_OF,
+    ATTR_DATA_STALE,
     ATTR_HIGH,
     ATTR_LOW,
     ATTR_OPEN,
@@ -115,6 +118,10 @@ class FinnhubQuoteSensor(
     @property
     def extra_state_attributes(self) -> dict:
         q = self._quote
+        raw_ts = q.get("t")
+        data_as_of = (
+            datetime.fromtimestamp(raw_ts, tz=UTC).isoformat() if raw_ts else None
+        )
         attrs = {
             ATTR_SYMBOL: self._symbol,
             ATTR_OPEN: q.get("o"),
@@ -123,6 +130,8 @@ class FinnhubQuoteSensor(
             ATTR_PREVIOUS_CLOSE: q.get("pc"),
             ATTR_CHANGE: q.get("d"),
             ATTR_CHANGE_PERCENT: q.get("dp"),
+            ATTR_DATA_AS_OF: data_as_of,
+            ATTR_DATA_STALE: self._is_stale(raw_ts),
         }
         # Merge in last known values for any keys that are currently None
         # (coordinator returns cached data outside hours, but on first boot
@@ -144,6 +153,23 @@ class FinnhubQuoteSensor(
         if self.coordinator.data:
             return self.coordinator.data.get(self._symbol, _EMPTY_QUOTE)
         return _EMPTY_QUOTE
+
+    def _is_stale(self, raw_ts: int | None) -> bool | None:
+        """
+        Is the data stale — i.e. more than one update interval old.
+
+        Return True if the Finnhub timestamp is more than one update
+        interval behind the current time — indicates a ticker that isn't
+        updating despite the market being open.
+        Returns None if timestamp is unavailable.
+        """
+        if not raw_ts:
+            return None
+        if not self.coordinator.update_interval:
+            return None
+        age = datetime.now(tz=UTC).timestamp() - raw_ts
+        threshold = self.coordinator.update_interval.total_seconds() * 2
+        return age > threshold
 
 
 class FinnhubHealthSensor(CoordinatorEntity[FinnhubCoordinator], SensorEntity):
