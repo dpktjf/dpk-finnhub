@@ -1,3 +1,4 @@
+# ruff: noqa
 """Standalone rate limiter tests — no Home Assistant dependency.
 
 Tests the RateLimiter class and scan interval logic directly.
@@ -5,7 +6,6 @@ Tests the RateLimiter class and scan interval logic directly.
 Run with:
     pytest tests/test_rate_limiter.py -v
 """
-# ruff: noqa
 
 from __future__ import annotations
 
