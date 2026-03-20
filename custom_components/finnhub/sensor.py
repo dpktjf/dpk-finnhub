@@ -9,6 +9,7 @@ from homeassistant.components.sensor import (
     SensorEntity,
     SensorStateClass,
 )
+from homeassistant.const import EntityCategory
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -49,6 +50,7 @@ async def async_setup_entry(
         FinnhubQuoteSensor(coordinator, symbol) for symbol in symbols
     ]
     entities.append(FinnhubHealthSensor(coordinator))
+    entities.append(FinnhubRateLimiterSensor(coordinator))
     async_add_entities(entities)
 
 
@@ -156,11 +158,7 @@ class FinnhubHealthSensor(CoordinatorEntity[FinnhubCoordinator], SensorEntity):
     @property
     def native_value(self) -> str:
         """Overall status string — ok, degraded, or error."""
-        if not self.coordinator.last_update_success:
-            return "error"
-        if self._missing_symbols:
-            return "degraded"
-        return "ok"
+        return self.coordinator.health_status
 
     @property
     def extra_state_attributes(self) -> dict:
@@ -170,7 +168,9 @@ class FinnhubHealthSensor(CoordinatorEntity[FinnhubCoordinator], SensorEntity):
             "last_update_success": self.coordinator.last_update_success,
             "last_successful_fetch": last_success.isoformat() if last_success else None,
             "symbols_tracked": len(self.coordinator.symbols),
-            "symbols_missing": self._missing_symbols,
+            "symbols_failed": self.coordinator.failed_symbols,
+            "symbols_ok": len(self.coordinator.symbols)
+            - len(self.coordinator.failed_symbols),
             "update_interval_seconds": (
                 int(self.coordinator.update_interval.total_seconds())
                 if self.coordinator.update_interval
@@ -180,9 +180,40 @@ class FinnhubHealthSensor(CoordinatorEntity[FinnhubCoordinator], SensorEntity):
             "market_session_active": self.coordinator.update_interval is not None,
         }
 
+
+class FinnhubRateLimiterSensor(CoordinatorEntity[FinnhubCoordinator], SensorEntity):
+    """Diagnostic sensor exposing rate limiter window utilisation."""
+
+    _attr_icon = "mdi:speedometer"
+    _attr_has_entity_name = False
+    _attr_name = "finnhub_rate_limiter"
+    _attr_unique_id = f"{DOMAIN}_rate_limiter"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
     @property
-    def _missing_symbols(self) -> list[str]:
-        """Symbols that are tracked but absent from the last fetch result."""
-        if not self.coordinator.data:
-            return list(self.coordinator.symbols)
-        return [s for s in self.coordinator.symbols if s not in self.coordinator.data]
+    def native_value(self) -> int:
+        """Calls used in the current 60s window — primary at-a-glance value."""
+        return self.coordinator._rate_limiter.minute_window_used
+
+    @property
+    def native_unit_of_measurement(self) -> str:
+        return "calls"
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        rl = self.coordinator._rate_limiter
+        minute_used = rl.minute_window_used
+        burst_used = rl.burst_window_used
+        return {
+            "minute_window_used": minute_used,
+            "minute_window_capacity": rl.minute_window_capacity,
+            "minute_window_remaining": rl.minute_window_capacity - minute_used,
+            "minute_window_pct": round(
+                minute_used / rl.minute_window_capacity * 100, 1
+            ),
+            "burst_window_used": burst_used,
+            "burst_window_capacity": rl.burst_window_capacity,
+            "burst_window_remaining": rl.burst_window_capacity - burst_used,
+            "burst_window_pct": round(burst_used / rl.burst_window_capacity * 100, 1),
+            "symbols_tracked": len(self.coordinator.symbols),
+        }

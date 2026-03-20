@@ -1,13 +1,13 @@
 From earlier in our conversation, the remaining recommended enhancements in priority order:
 
 **Reliability**
-1. **Re-auth flow** — `async_step_reauth()` in `config_flow.py`. When a key is revoked HA surfaces a persistent notification rather than silently failing. Highest priority missing feature.
-2. **Retry with exponential backoff** — transient network blips silently drop symbols from that update cycle. A backoff decorator on `get_quote()` in `api.py` would handle these without hammering the API.
-3. **Partial update failure handling** — carry forward last known value for symbols that fail in a given cycle rather than dropping them from results entirely.
+1. **DONE** **Re-auth flow** — `async_step_reauth()` in `config_flow.py`. When a key is revoked HA surfaces a persistent notification rather than silently failing. Highest priority missing feature.
+2. **DONE** **Retry with exponential backoff** — transient network blips silently drop symbols from that update cycle. A backoff decorator on `get_quote()` in `api.py` would handle these without hammering the API.
+3. **DONE** **Partial update failure handling** — carry forward last known value for symbols that fail in a given cycle rather than dropping them from results entirely.
 
 **Observability**
 4. **`async_get_config_entry_diagnostics()`** — one function in `__init__.py`, adds a **Download Diagnostics** button in the UI that dumps coordinator state with the API key redacted. Very low effort.
-5. **Rate limiter sensor** — expose calls used in current minute/burst windows as a diagnostic sensor. Useful with large symbol lists.
+5. **DONE** **Rate limiter sensor** — expose calls used in current minute/burst windows as a diagnostic sensor. Useful with large symbol lists.
 6. **Stale data indicator** — add `data_as_of` attribute to each quote sensor using the Finnhub `t` timestamp field. Surfaces when a ticker is returning stale data.
 
 **User experience**

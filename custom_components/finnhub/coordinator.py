@@ -17,6 +17,10 @@ from homeassistant.util import dt as dt_util
 from .api import FinnhubApiError, FinnhubClient, MarketStatus, QuoteResult
 from .const import (
     DOMAIN,
+    HEALTH_ERROR,
+    HEALTH_OK,
+    HEALTH_PARTIAL,
+    HEALTH_PAUSED,
     MARKET_CLOSE,
     MARKET_DAYS,
     MARKET_OPEN,
@@ -89,7 +93,8 @@ class FinnhubCoordinator(DataUpdateCoordinator[dict[str, QuoteResult]]):
         self._trading_today: bool | None = None  # None = not yet checked today
         self._trading_today_date: date | None = None  # date it was last checked
         self.last_update_success_time: datetime | None = None
-
+        self.health_status: str = HEALTH_OK
+        self.failed_symbols: list[str] = []
         self._client: FinnhubClient | None = None
 
         _LOGGER.debug(
@@ -233,6 +238,8 @@ class FinnhubCoordinator(DataUpdateCoordinator[dict[str, QuoteResult]]):
             raise UpdateFailed(str(err)) from err
 
         if not market_open:
+            self.health_status = HEALTH_PAUSED
+            self.failed_symbols = []
             _LOGGER.debug(
                 "Finnhub: outside market hours — pausing polling until %s",
                 next_market_open(),
@@ -241,9 +248,7 @@ class FinnhubCoordinator(DataUpdateCoordinator[dict[str, QuoteResult]]):
             self.update_interval = None
             # Schedule a wakeup at next market open
             self._schedule_market_open_wakeup()
-            if self.data:
-                return self.data
-            return {}
+            return self.data or {}
 
         # We're inside market hours — make sure polling is active
         if self.update_interval is None:
@@ -252,6 +257,7 @@ class FinnhubCoordinator(DataUpdateCoordinator[dict[str, QuoteResult]]):
 
         client = self._get_client()
         results: dict[str, QuoteResult] = {}
+        failed: list[str] = []
 
         for symbol in self.symbols:
             await self._rate_limiter.acquire()
@@ -260,10 +266,38 @@ class FinnhubCoordinator(DataUpdateCoordinator[dict[str, QuoteResult]]):
                 quote = await client.get_quote(symbol)
                 if quote is not None:
                     results[symbol] = quote
+                else:
+                    failed.append(symbol)
             except FinnhubApiError as err:
                 if "401" in str(err):
                     raise ConfigEntryAuthFailed(str(err)) from err
                 raise UpdateFailed(str(err)) from err
+            except Exception:
+                failed.append(symbol)
+
+        # Carry forward last known data for any symbols that failed this cycle
+        # so sensors retain their last value rather than going unavailable
+        if failed and self.data:
+            for symbol in failed:
+                if symbol in self.data:
+                    results[symbol] = self.data[symbol]
+                    _LOGGER.debug(
+                        "Finnhub: carrying forward last known value for %s",
+                        symbol,
+                    )
+                else:
+                    _LOGGER.warning(
+                        "Finnhub: no previous data to carry forward for %s",
+                        symbol,
+                    )
+
+        self.failed_symbols = failed
+        if failed and len(failed) == len(self.symbols):
+            self.health_status = HEALTH_ERROR
+        elif failed:
+            self.health_status = HEALTH_PARTIAL
+        else:
+            self.health_status = HEALTH_OK
 
         self.last_update_success_time = dt_util.now()
         next_call = dt_util.now() + self.update_interval

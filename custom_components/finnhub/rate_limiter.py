@@ -70,3 +70,23 @@ class RateLimiter:
             now = time.monotonic()
             self._calls.append(now)
             self._burst.append(now)
+
+    @property
+    def minute_window_used(self) -> int:
+        """Current number of calls recorded in the 60s window."""
+        now = time.monotonic()
+        return sum(1 for t in self._calls if now - t < self.period)
+
+    @property
+    def burst_window_used(self) -> int:
+        """Current number of calls recorded in the 1s burst window."""
+        now = time.monotonic()
+        return sum(1 for t in self._burst if now - t < self.burst_period)
+
+    @property
+    def minute_window_capacity(self) -> int:
+        return self.max_calls
+
+    @property
+    def burst_window_capacity(self) -> int:
+        return self.max_burst
