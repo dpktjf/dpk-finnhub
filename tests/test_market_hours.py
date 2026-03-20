@@ -8,7 +8,7 @@ from _fetch_market_status.
 Run with:
     pytest tests/test_market_hours.py -v
 """
-# ruff: noqa
+# ruff: noqa: BLE001, PLR2004, PLR0912
 
 from __future__ import annotations
 

@@ -7,7 +7,7 @@ frozen datetime values injected via monkeypatch.
 Run with:
     pytest tests/test_market_hours_standalone.py -v
 """
-# ruff: noqa
+# ruff: noqa BLE001, PLR2004, PLR0912
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-# ruff: noqa
+# ruff: noqa: BLE001, PLR2004, PLR0912
 """Standalone rate limiter tests — no Home Assistant dependency.
 
 Tests the RateLimiter class and scan interval logic directly.
