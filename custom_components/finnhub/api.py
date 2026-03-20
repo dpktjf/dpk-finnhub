@@ -43,7 +43,7 @@ class QuoteResult(TypedDict):
     c: float  # current price
     o: float  # open
     h: float  # high
-    l: float  # low
+    l: float  # low  # noqa: E741
     pc: float  # previous close
     d: float  # change
     dp: float  # change percent
@@ -137,8 +137,7 @@ class FinnhubClient:
 
                 if data.get("c", 0) == 0 and data.get("t", 0) == 0:
                     _LOGGER.warning(
-                        "Finnhub returned empty quote for '%s' — "
-                        "check the ticker is valid",
+                        "Finnhub returned empty quote for '%s' — check the ticker is valid",
                         symbol,
                     )
                     return None

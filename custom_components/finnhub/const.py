@@ -8,15 +8,15 @@ CONF_SYMBOLS = "symbols"
 CONF_MARKET_OPEN = "market_open"
 CONF_MARKET_CLOSE = "market_close"
 
-# FINNHUB_QUOTE_URL = "https://finnhub.io/api/v1/quote"
+# FINNHUB_QUOTE_URL = "https://finnhub.io/api/v1/quote"  # noqa: ERA001
 FINNHUB_QUOTE_URL = "http://127.0.0.1:5000/api/v1/quote"
-# FINNHUB_MARKET_STATUS_URL = "https://finnhub.io/api/v1/stock/market-status"
+# FINNHUB_MARKET_STATUS_URL = "https://finnhub.io/api/v1/stock/market-status"  # noqa: ERA001
 FINNHUB_MARKET_STATUS_URL = "http://127.0.0.1:5000/api/v1/stock/market-status"
 
 # Market session — NYSE/NASDAQ core hours in America/New_York
 MARKET_TIMEZONE = "America/New_York"
-# MARKET_OPEN = time(9, 30)
-# MARKET_CLOSE = time(16, 0)
+# MARKET_OPEN = time(9, 30)  # noqa: ERA001
+# MARKET_CLOSE = time(16, 0)  # noqa: ERA001
 MARKET_OPEN = time(2, 39)
 MARKET_CLOSE = time(17, 55)
 MARKET_DAYS = frozenset({0, 1, 2, 3, 4})  # Monday=0 … Friday=4
