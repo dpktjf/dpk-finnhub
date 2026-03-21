@@ -1,3 +1,4 @@
+# ruff: noqa
 """Standalone rate limiter tests — no Home Assistant dependency.
 
 Tests the RateLimiter class and scan interval logic directly.
@@ -71,9 +72,7 @@ async def run_acquires(limiter: RateLimiter, count: int) -> list[float]:
     with patch("asyncio.sleep", side_effect=mock_sleep):
         for _ in range(count):
             await limiter.acquire()
-            assert len(limiter._calls) <= limiter.max_calls, (
-                f"Deque exceeded {limiter.max_calls} — rate limiter broken"
-            )
+            assert len(limiter._calls) <= limiter.max_calls, f"Deque exceeded {limiter.max_calls} — rate limiter broken"
 
     return sleep_calls
 
@@ -90,9 +89,7 @@ class Test40Tickers:
         limiter = RateLimiter(max_calls=55, period=60.0)
         sleep_calls = await run_acquires(limiter, 40)
 
-        assert sleep_calls == [], (
-            f"Expected no throttling for 40 tickers, got sleeps: {sleep_calls}"
-        )
+        assert sleep_calls == [], f"Expected no throttling for 40 tickers, got sleeps: {sleep_calls}"
 
     @pytest.mark.asyncio
     async def test_all_calls_recorded(self):
@@ -119,9 +116,7 @@ class Test60Tickers:
         limiter = RateLimiter(max_calls=55, period=60.0)
         sleep_calls = await run_acquires(limiter, 60)
 
-        assert len(sleep_calls) >= 1, (
-            f"Expected throttling for 60 tickers against 55 cap, got none"
-        )
+        assert len(sleep_calls) >= 1, f"Expected throttling for 60 tickers against 55 cap, got none"
 
     @pytest.mark.asyncio
     async def test_sleep_duration_is_valid(self):

@@ -1,12 +1,13 @@
 {
   "domain": "finnhub",
   "name": "Finnhub Stock Quotes",
-  "version": "1.0.0",
-  "documentation": "https://finnhub.io/docs/api",
-  "requirements": [],
-  "dependencies": [],
   "codeowners": [],
-  "iot_class": "cloud_polling",
   "config_flow": true,
-  "integration_type": "service"
+  "dependencies": [],
+  "documentation": "https://finnhub.io/docs/api",
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/dpktjf/dpk-finnhub/issues",
+  "requirements": [],
+  "version": "1.0.0"
 }

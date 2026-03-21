@@ -1,15 +1,22 @@
 """Config flow and options flow for Finnhub integration."""
+
 from __future__ import annotations
 
 import logging
+import re
+from http import HTTPStatus
 from typing import Any
 
 import aiohttp
 import voluptuous as vol
-
-from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult, OptionsFlow
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigFlow,
+    ConfigFlowResult,
+    OptionsFlow,
+)
 from homeassistant.const import CONF_API_KEY
-from homeassistant.core import callback
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import CONF_SYMBOLS, DOMAIN, FINNHUB_QUOTE_URL
@@ -20,9 +27,9 @@ _LOGGER = logging.getLogger(__name__)
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _parse_symbols(raw: str) -> list[str]:
     """Split a comma/space/newline-separated string into a clean symbol list."""
-    import re
     tokens = re.split(r"[\s,;]+", raw.upper())
     return [t.strip() for t in tokens if t.strip()]
 
@@ -31,7 +38,7 @@ def _symbols_to_str(symbols: list[str]) -> str:
     return ", ".join(symbols)
 
 
-async def _validate_api_key(hass, api_key: str) -> str | None:
+async def _validate_api_key(hass: HomeAssistant, api_key: str) -> str | None:
     """Return an error key string if the key is invalid, else None."""
     session = async_get_clientsession(hass)
     try:
@@ -40,14 +47,15 @@ async def _validate_api_key(hass, api_key: str) -> str | None:
             params={"symbol": "AAPL", "token": api_key},
             timeout=aiohttp.ClientTimeout(total=10),
         ) as resp:
-            if resp.status == 401:
+            if resp.status == HTTPStatus.UNAUTHORIZED:
                 return "invalid_api_key"
-            if resp.status == 429:
+            if resp.status == HTTPStatus.TOO_MANY_REQUESTS:
                 return "rate_limit"
             resp.raise_for_status()
     except aiohttp.ClientError:
         return "cannot_connect"
-    except Exception:  # noqa: BLE001
+    except (TimeoutError, ValueError) as err:
+        _LOGGER.warning("Finnhub: unexpected error validating API key: %s", err)
         return "unknown"
     return None
 
@@ -56,14 +64,14 @@ async def _validate_api_key(hass, api_key: str) -> str | None:
 # Config flow (initial setup)
 # ---------------------------------------------------------------------------
 
+
 class FinnhubConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle initial configuration via the UI."""
 
     VERSION = 1
 
-    async def async_step_user(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
+    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Handle the initial step of the config flow."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
@@ -98,7 +106,11 @@ class FinnhubConfigFlow(ConfigFlow, domain=DOMAIN):
                 ): str,
                 vol.Required(
                     CONF_SYMBOLS,
-                    description={"suggested_value": user_input.get(CONF_SYMBOLS, "AAPL, MSFT, GOOGL") if user_input else "AAPL, MSFT, GOOGL"},
+                    description={
+                        "suggested_value": user_input.get(CONF_SYMBOLS, "AAPL, MSFT, GOOGL")
+                        if user_input
+                        else "AAPL, MSFT, GOOGL"
+                    },
                 ): str,
             }
         )
@@ -107,27 +119,65 @@ class FinnhubConfigFlow(ConfigFlow, domain=DOMAIN):
             step_id="user",
             data_schema=schema,
             errors=errors,
-            description_placeholders={
-                "symbol_hint": "Enter symbols separated by commas, e.g. AAPL, MSFT, TSLA"
-            },
+            description_placeholders={"symbol_hint": "Enter symbols separated by commas, e.g. AAPL, MSFT, TSLA"},
         )
 
     @staticmethod
     @callback
-    def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
+    def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:  # noqa: ARG004
+        """Return the options flow handler for this config entry."""
         return FinnhubOptionsFlow()
+
+    async def async_step_reauth(
+        self,
+        user_input: dict[str, Any] | None = None,  # noqa: ARG002
+    ) -> ConfigFlowResult:
+        """Handle re-authentication when the API key is rejected."""
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Confirm re-authentication and update the API key."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            api_key: str = user_input[CONF_API_KEY].strip()
+            error = await _validate_api_key(self.hass, api_key)
+            if error:
+                errors["base"] = error
+            else:
+                # Update the existing entry with the new key, preserving symbols
+                self.hass.config_entries.async_update_entry(
+                    self._get_reauth_entry(),
+                    data={
+                        **self._get_reauth_entry().data,
+                        CONF_API_KEY: api_key,
+                    },
+                )
+                await self.hass.config_entries.async_reload(self._get_reauth_entry().entry_id)
+                return self.async_abort(reason="reauth_successful")
+
+        schema = vol.Schema({vol.Required(CONF_API_KEY): str})
+
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=schema,
+            errors=errors,
+            description_placeholders={
+                "integration_name": "Finnhub",
+            },
+        )
 
 
 # ---------------------------------------------------------------------------
 # Options flow (reconfigure after setup)
 # ---------------------------------------------------------------------------
 
+
 class FinnhubOptionsFlow(OptionsFlow):
     """Allow editing API key and symbols after initial setup."""
 
-    async def async_step_init(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Handle the initial step of the options flow."""
         errors: dict[str, str] = {}
 
         # Current stored values
@@ -170,7 +220,5 @@ class FinnhubOptionsFlow(OptionsFlow):
             step_id="init",
             data_schema=schema,
             errors=errors,
-            description_placeholders={
-                "symbol_hint": "Separate symbols with commas, e.g. AAPL, MSFT, TSLA"
-            },
+            description_placeholders={"symbol_hint": "Separate symbols with commas, e.g. AAPL, MSFT, TSLA"},
         )

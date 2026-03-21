@@ -1,14 +1,18 @@
 """Finnhub Stock Quotes integration."""
+
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_API_KEY, Platform
-from homeassistant.core import HomeAssistant
 
 from .const import CONF_SYMBOLS, DOMAIN
 from .coordinator import FinnhubCoordinator
+
+if TYPE_CHECKING:
+    from homeassistant.config_entries import ConfigEntry
+    from homeassistant.core import HomeAssistant
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -21,7 +25,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     symbols: list[str] = entry.data[CONF_SYMBOLS]
 
     coordinator = FinnhubCoordinator(hass, api_key=api_key, symbols=symbols)
-    await coordinator.async_config_entry_first_refresh()
+
+    # Schedule the first fetch in the background so HA startup is not
+    # blocked. Sensors will show unavailable briefly until the first
+    # successful update completes.
+    entry.async_create_background_task(
+        hass,
+        coordinator.async_refresh(),
+        name="finnhub_initial_fetch",
+    )
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
 

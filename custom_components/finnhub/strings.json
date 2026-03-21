@@ -12,6 +12,16 @@
           "api_key": "Your Finnhub.io API key (free tier supports 60 requests/minute).",
           "symbols": "{symbol_hint}"
         }
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate Finnhub",
+        "description": "Your Finnhub API key has been rejected. Please enter a new one. Your tracked symbols will be preserved.",
+        "data": {
+          "api_key": "API Key"
+        },
+        "data_description": {
+          "api_key": "Your replacement Finnhub.io API key."
+        }
       }
     },
     "error": {
@@ -22,7 +32,8 @@
       "unknown": "An unexpected error occurred. Check the Home Assistant logs."
     },
     "abort": {
-      "already_configured": "This Finnhub account is already configured."
+      "already_configured": "This Finnhub account is already configured.",
+      "reauth_successful": "Re-authentication was successful. Finnhub is now active again."
     }
   },
   "options": {
