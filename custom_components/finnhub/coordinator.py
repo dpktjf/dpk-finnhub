@@ -39,9 +39,9 @@ from .const import (
 from .rate_limiter import RateLimiter
 
 if TYPE_CHECKING:
-    from homeassistant.config_entries import ConfigEntry
     from collections.abc import Callable
 
+    from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
 
 _LOGGER = logging.getLogger(__name__)
