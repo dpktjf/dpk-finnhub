@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
 import aiohttp
+from homeassistant.const import CONF_API_KEY
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_track_point_in_time
@@ -17,6 +18,9 @@ from homeassistant.util import dt as dt_util
 
 from .api import FinnhubApiError, FinnhubClient, MarketStatus, QuoteResult
 from .const import (
+    CONF_SCAN_INTERVAL,
+    CONF_SYMBOLS,
+    DEFAULT_SCAN_INTERVAL_MINUTES,
     DOMAIN,
     HEALTH_ERROR,
     HEALTH_OK,
@@ -35,6 +39,7 @@ from .const import (
 from .rate_limiter import RateLimiter
 
 if TYPE_CHECKING:
+    from homeassistant.config_entries import ConfigEntry
     from collections.abc import Callable
 
     from homeassistant.core import HomeAssistant
@@ -43,15 +48,26 @@ _LOGGER = logging.getLogger(__name__)
 _TZ = ZoneInfo(MARKET_TIMEZONE)
 
 
-def _safe_scan_interval(symbol_count: int) -> timedelta:
+def _safe_scan_interval(symbol_count: int, requested_minutes: int) -> timedelta:
     """
-    Return the minimum safe polling interval for the given symbol count.
+    Compute safe scan interval based on symbol count and user preference.
 
-    Finnhub free tier: 60 req/min (we use 55 as a safety buffer).
-    We need at least one full minute per 55 symbols to stay under quota.
+    Return the polling interval, respecting both the user's preference
+    and the minimum required by the rate limiter for the given symbol count.
+
+    The rate limiter minimum takes precedence — requesting 1 minute with
+    80 symbols will be silently floored to 2 minutes to avoid quota breach.
     """
-    minutes_needed = math.ceil(symbol_count / RATE_LIMIT_CALLS)
-    return timedelta(minutes=max(1, minutes_needed))
+    rate_limit_minimum = math.ceil(symbol_count / RATE_LIMIT_CALLS)
+    effective_minutes = max(requested_minutes, rate_limit_minimum)
+    if effective_minutes > requested_minutes:
+        _LOGGER.warning(
+            "Finnhub: requested interval %dm is too short for %d symbols — using %dm to stay within rate limit",
+            requested_minutes,
+            symbol_count,
+            effective_minutes,
+        )
+    return timedelta(minutes=effective_minutes)
 
 
 def next_market_open() -> datetime:
@@ -73,12 +89,12 @@ class FinnhubCoordinator(DataUpdateCoordinator[dict[str, QuoteResult]]):
     def __init__(
         self,
         hass: HomeAssistant,
-        api_key: str,
-        symbols: list[str],
+        entry: ConfigEntry,
     ) -> None:
         """Initialize the coordinator."""
-        self.api_key = api_key
-        self.symbols = [s.upper().strip() for s in symbols if s.strip()]
+        self.api_key = entry.data[CONF_API_KEY]
+        self.symbols = [s.upper().strip() for s in entry.data[CONF_SYMBOLS] if s.strip()]
+        self._requested_scan_interval = entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL_MINUTES)
         self._rate_limiter = RateLimiter(
             max_calls=RATE_LIMIT_CALLS,
             period=RATE_LIMIT_PERIOD,
@@ -86,7 +102,7 @@ class FinnhubCoordinator(DataUpdateCoordinator[dict[str, QuoteResult]]):
             burst_period=RATE_LIMIT_BURST_PERIOD,
         )
 
-        scan_interval = _safe_scan_interval(len(self.symbols))
+        scan_interval = _safe_scan_interval(len(self.symbols), self._requested_scan_interval)
         self._unsub_market_open: Callable[[], None] | None = None
         self._market_status: MarketStatus | None = None
         self._market_status_fetched_at: float = 0.0
@@ -119,12 +135,12 @@ class FinnhubCoordinator(DataUpdateCoordinator[dict[str, QuoteResult]]):
             )
         return self._client
 
-    def update_config(self, api_key: str, symbols: list[str]) -> None:
-        """Apply updated configuration and recalculate the scan interval."""
-        self.api_key = api_key
-        self.symbols = [s.upper().strip() for s in symbols if s.strip()]
-        self.update_interval = _safe_scan_interval(len(self.symbols))
-        # Force client rebuild with new api_key
+    def update_config(self, entry: ConfigEntry) -> None:
+        """Update coordinator config from the given entry (e.g. after options flow)."""
+        self.api_key = entry.data[CONF_API_KEY]
+        self.symbols = [s.upper().strip() for s in entry.data[CONF_SYMBOLS] if s.strip()]
+        self._requested_scan_interval = entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL_MINUTES)
+        self.update_interval = _safe_scan_interval(len(self.symbols), self._requested_scan_interval)
         self._client = None
         self._market_status = None
         self._market_status_fetched_at = 0.0
@@ -241,7 +257,7 @@ class FinnhubCoordinator(DataUpdateCoordinator[dict[str, QuoteResult]]):
 
         # We're inside market hours — make sure polling is active
         if self.update_interval is None:
-            self.update_interval = _safe_scan_interval(len(self.symbols))
+            self.update_interval = _safe_scan_interval(len(self.symbols), self._requested_scan_interval)
             _LOGGER.debug("Finnhub: polling resumed, interval %s", self.update_interval)
 
         client = self._get_client()

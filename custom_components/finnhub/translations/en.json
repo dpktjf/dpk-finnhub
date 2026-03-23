@@ -6,11 +6,13 @@
         "description": "Enter your Finnhub API key and the equity symbols you want to track.",
         "data": {
           "api_key": "API Key",
-          "symbols": "Symbols"
+          "symbols": "Symbols",
+          "scan_interval": "Poll Interval (minutes)"
         },
         "data_description": {
           "api_key": "Your Finnhub.io API key (free tier supports 60 requests/minute).",
-          "symbols": "{symbol_hint}"
+          "symbols": "{symbol_hint}",
+          "scan_interval": "How often to fetch prices during market hours (1–60 minutes). May be automatically increased for large symbol lists to stay within rate limits."
         }
       },
       "reauth_confirm": {
@@ -29,7 +31,8 @@
       "cannot_connect": "Could not reach Finnhub. Check your network connection.",
       "rate_limit": "Finnhub rate limit hit during validation. Wait a moment and retry.",
       "no_symbols": "Please enter at least one valid ticker symbol.",
-      "unknown": "An unexpected error occurred. Check the Home Assistant logs."
+      "unknown": "An unexpected error occurred. Check the Home Assistant logs.",
+      "invalid_scan_interval": "Poll interval must be between 1 and 60 minutes."
     },
     "abort": {
       "already_configured": "This Finnhub account is already configured.",
@@ -43,11 +46,13 @@
         "description": "Update your API key or the list of tracked symbols.",
         "data": {
           "api_key": "API Key",
-          "symbols": "Symbols"
+          "symbols": "Symbols",
+          "scan_interval": "Poll Interval (minutes)"
         },
         "data_description": {
           "api_key": "Your Finnhub.io API key.",
-          "symbols": "{symbol_hint}"
+          "symbols": "{symbol_hint}",
+          "scan_interval": "How often to fetch prices during market hours (1–60 minutes). May be automatically increased for large symbol lists to stay within rate limits."
         }
       }
     },
@@ -56,7 +61,8 @@
       "cannot_connect": "Could not reach Finnhub. Check your network connection.",
       "rate_limit": "Finnhub rate limit hit during validation. Wait a moment and retry.",
       "no_symbols": "Please enter at least one valid ticker symbol.",
-      "unknown": "An unexpected error occurred. Check the Home Assistant logs."
+      "unknown": "An unexpected error occurred. Check the Home Assistant logs.",
+      "invalid_scan_interval": "Poll interval must be between 1 and 60 minutes."
     }
   }
 }

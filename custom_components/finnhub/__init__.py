@@ -5,9 +5,9 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from homeassistant.const import CONF_API_KEY, Platform
+from homeassistant.const import Platform
 
-from .const import CONF_SYMBOLS, DOMAIN
+from .const import DOMAIN
 from .coordinator import FinnhubCoordinator
 
 if TYPE_CHECKING:
@@ -21,10 +21,7 @@ PLATFORMS: list[Platform] = [Platform.SENSOR]
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Finnhub from a config entry."""
-    api_key: str = entry.data[CONF_API_KEY]
-    symbols: list[str] = entry.data[CONF_SYMBOLS]
-
-    coordinator = FinnhubCoordinator(hass, api_key=api_key, symbols=symbols)
+    coordinator = FinnhubCoordinator(hass, entry)
 
     # Schedule the first fetch in the background so HA startup is not
     # blocked. Sensors will show unavailable briefly until the first
@@ -48,10 +45,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Handle config entry updates (options flow saves)."""
     coordinator: FinnhubCoordinator = hass.data[DOMAIN][entry.entry_id]
-    coordinator.update_config(
-        api_key=entry.data[CONF_API_KEY],
-        symbols=entry.data[CONF_SYMBOLS],
-    )
+    coordinator.update_config(entry)
+
     # Reload platform so sensor entities are added/removed as needed
     await hass.config_entries.async_reload(entry.entry_id)
 

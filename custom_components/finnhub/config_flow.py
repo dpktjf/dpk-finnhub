@@ -19,7 +19,15 @@ from homeassistant.const import CONF_API_KEY
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import CONF_SYMBOLS, DOMAIN, FINNHUB_QUOTE_URL
+from .const import (
+    CONF_SCAN_INTERVAL,
+    CONF_SYMBOLS,
+    DEFAULT_SCAN_INTERVAL_MINUTES,
+    DOMAIN,
+    FINNHUB_QUOTE_URL,
+    MAX_SCAN_INTERVAL_MINUTES,
+    MIN_SCAN_INTERVAL_MINUTES,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -78,9 +86,12 @@ class FinnhubConfigFlow(ConfigFlow, domain=DOMAIN):
             api_key: str = user_input[CONF_API_KEY].strip()
             symbols_raw: str = user_input[CONF_SYMBOLS]
             symbols = _parse_symbols(symbols_raw)
+            scan_interval: int = user_input[CONF_SCAN_INTERVAL]
 
             if not symbols:
                 errors[CONF_SYMBOLS] = "no_symbols"
+            elif not MIN_SCAN_INTERVAL_MINUTES <= scan_interval <= MAX_SCAN_INTERVAL_MINUTES:
+                errors[CONF_SCAN_INTERVAL] = "invalid_scan_interval"
             else:
                 error = await _validate_api_key(self.hass, api_key)
                 if error:
@@ -95,6 +106,7 @@ class FinnhubConfigFlow(ConfigFlow, domain=DOMAIN):
                         data={
                             CONF_API_KEY: api_key,
                             CONF_SYMBOLS: symbols,
+                            CONF_SCAN_INTERVAL: scan_interval,
                         },
                     )
 
@@ -112,6 +124,16 @@ class FinnhubConfigFlow(ConfigFlow, domain=DOMAIN):
                         else "AAPL, MSFT, GOOGL"
                     },
                 ): str,
+                vol.Required(
+                    CONF_SCAN_INTERVAL,
+                    default=DEFAULT_SCAN_INTERVAL_MINUTES,
+                ): vol.All(
+                    vol.Coerce(int),
+                    vol.Range(
+                        min=MIN_SCAN_INTERVAL_MINUTES,
+                        max=MAX_SCAN_INTERVAL_MINUTES,
+                    ),
+                ),
             }
         )
 
@@ -183,14 +205,18 @@ class FinnhubOptionsFlow(OptionsFlow):
         # Current stored values
         current_api_key: str = self.config_entry.data.get(CONF_API_KEY, "")
         current_symbols: list[str] = self.config_entry.data.get(CONF_SYMBOLS, [])
+        current_scan_interval: int = self.config_entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL_MINUTES)
 
         if user_input is not None:
             api_key: str = user_input[CONF_API_KEY].strip()
             symbols_raw: str = user_input[CONF_SYMBOLS]
             symbols = _parse_symbols(symbols_raw)
+            scan_interval: int = user_input[CONF_SCAN_INTERVAL]
 
             if not symbols:
                 errors[CONF_SYMBOLS] = "no_symbols"
+            elif not MIN_SCAN_INTERVAL_MINUTES <= scan_interval <= MAX_SCAN_INTERVAL_MINUTES:
+                errors[CONF_SCAN_INTERVAL] = "invalid_scan_interval"
             else:
                 error = await _validate_api_key(self.hass, api_key)
                 if error:
@@ -202,6 +228,7 @@ class FinnhubOptionsFlow(OptionsFlow):
                         data={
                             CONF_API_KEY: api_key,
                             CONF_SYMBOLS: symbols,
+                            CONF_SCAN_INTERVAL: scan_interval,
                         },
                     )
                     return self.async_create_entry(title="", data={})
@@ -213,6 +240,16 @@ class FinnhubOptionsFlow(OptionsFlow):
                     CONF_SYMBOLS,
                     default=_symbols_to_str(current_symbols),
                 ): str,
+                vol.Required(
+                    CONF_SCAN_INTERVAL,
+                    default=current_scan_interval,
+                ): vol.All(
+                    vol.Coerce(int),
+                    vol.Range(
+                        min=MIN_SCAN_INTERVAL_MINUTES,
+                        max=MAX_SCAN_INTERVAL_MINUTES,
+                    ),
+                ),
             }
         )
 

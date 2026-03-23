@@ -7,10 +7,12 @@ DOMAIN = "finnhub"
 CONF_SYMBOLS = "symbols"
 CONF_MARKET_OPEN = "market_open"
 CONF_MARKET_CLOSE = "market_close"
+CONF_SCAN_INTERVAL = "scan_interval"
+DEFAULT_SCAN_INTERVAL_MINUTES = 5
 
 FINNHUB_QUOTE_URL = "https://finnhub.io/api/v1/quote"
-# FINNHUB_QUOTE_URL = "http://127.0.0.1:5000/api/v1/quote" # noqa: ERA001
 FINNHUB_MARKET_STATUS_URL = "https://finnhub.io/api/v1/stock/market-status"
+# FINNHUB_QUOTE_URL = "http://127.0.0.1:5000/api/v1/quote"  # noqa: ERA001
 # FINNHUB_MARKET_STATUS_URL = "http://127.0.0.1:5000/api/v1/stock/market-status"  # noqa: ERA001
 
 # Market session — NYSE/NASDAQ core hours in America/New_York
@@ -22,6 +24,10 @@ MARKET_EXCHANGE = "US"
 
 # How long to cache the market status response (avoid hammering the endpoint)
 MARKET_STATUS_CACHE_SECONDS = 60
+
+# Scan interval limits (in minutes)
+MIN_SCAN_INTERVAL_MINUTES = 1
+MAX_SCAN_INTERVAL_MINUTES = 60
 
 # Rate limiter: stay under 60/min with a safety buffer
 RATE_LIMIT_CALLS = 50  # max 60 calls at source
