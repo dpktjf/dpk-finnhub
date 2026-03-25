@@ -8,12 +8,25 @@ CONF_SYMBOLS = "symbols"
 CONF_MARKET_OPEN = "market_open"
 CONF_MARKET_CLOSE = "market_close"
 CONF_SCAN_INTERVAL = "scan_interval"
+CONF_LEVELS = "levels"
 DEFAULT_SCAN_INTERVAL_MINUTES = 5
 
-FINNHUB_QUOTE_URL = "https://finnhub.io/api/v1/quote"
-FINNHUB_MARKET_STATUS_URL = "https://finnhub.io/api/v1/stock/market-status"
-# FINNHUB_QUOTE_URL = "http://127.0.0.1:5000/api/v1/quote"  # noqa: ERA001
-# FINNHUB_MARKET_STATUS_URL = "http://127.0.0.1:5000/api/v1/stock/market-status"  # noqa: ERA001
+# Price level keys
+LEVEL_UPPER_1 = "upper_1"
+LEVEL_UPPER_2 = "upper_2"
+LEVEL_LOWER_1 = "lower_1"
+LEVEL_LOWER_2 = "lower_2"
+ALL_LEVELS = [LEVEL_UPPER_1, LEVEL_UPPER_2, LEVEL_LOWER_1, LEVEL_LOWER_2]
+
+# Per-ticker config entity defaults
+DEFAULT_HYSTERESIS = 0.5  # USD — price must move this far back before re-alerting
+MIN_HYSTERESIS = 0.0
+MAX_HYSTERESIS = 50.0
+
+# FINNHUB_QUOTE_URL = "https://finnhub.io/api/v1/quote"
+# FINNHUB_MARKET_STATUS_URL = "https://finnhub.io/api/v1/stock/market-status"
+FINNHUB_QUOTE_URL = "http://127.0.0.1:5000/api/v1/quote"  # noqa: ERA001
+FINNHUB_MARKET_STATUS_URL = "http://127.0.0.1:5000/api/v1/stock/market-status"  # noqa: ERA001
 
 # Market session — NYSE/NASDAQ core hours in America/New_York
 MARKET_TIMEZONE = "America/New_York"

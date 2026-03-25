@@ -65,7 +65,9 @@ _EMPTY_QUOTE: QuoteResult = {
     "dp": 0.0,
     "t": 0,
 }
-_DEVICE_INFO = DeviceInfo(
+
+# Integration-level device (health + rate limiter sensors)
+_INTEGRATION_DEVICE_INFO = DeviceInfo(
     identifiers={(DOMAIN, "finnhub")},
     name="Finnhub",
     manufacturer="Finnhub.io",
@@ -74,11 +76,21 @@ _DEVICE_INFO = DeviceInfo(
 )
 
 
+def _ticker_device(symbol: str) -> DeviceInfo:
+    """Per-ticker device — groups price, levels, hysteresis, alert switch."""
+    return DeviceInfo(
+        identifiers={(DOMAIN, symbol.upper())},
+        name=symbol.upper(),
+        manufacturer="Finnhub.io",
+        model="Equity",
+        entry_type=DeviceEntryType.SERVICE,
+    )
+
+
 class FinnhubQuoteSensor(CoordinatorEntity[FinnhubCoordinator], SensorEntity, RestoreEntity):
     """A sensor representing the current price of a single equity symbol."""
 
     _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_device_info = _DEVICE_INFO
     _attr_native_unit_of_measurement = "USD"
     _attr_icon = "mdi:chart-line"
     _attr_has_entity_name = False
@@ -90,6 +102,7 @@ class FinnhubQuoteSensor(CoordinatorEntity[FinnhubCoordinator], SensorEntity, Re
         self._attr_unique_id = f"{DOMAIN}_{self._symbol.lower()}"
         self._attr_name = self._symbol
         self.entity_id = f"sensor.market_{self._symbol.lower()}"
+        self._attr_device_info = _ticker_device(self._symbol)
         self._last_known_value: float | None = None
         self._last_known_attributes: dict[str, Any] = {}
 
@@ -170,7 +183,7 @@ class FinnhubHealthSensor(CoordinatorEntity[FinnhubCoordinator], SensorEntity):
     """Coordinator health — exposes last fetch time, error count, and status."""
 
     _attr_icon = "mdi:heart-pulse"
-    _attr_device_info = _DEVICE_INFO
+    _attr_device_info = _INTEGRATION_DEVICE_INFO
     _attr_has_entity_name = False
     _attr_name = "finnhub_health"
     _attr_unique_id = f"{DOMAIN}_health"
