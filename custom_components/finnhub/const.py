@@ -33,7 +33,7 @@ FINNHUB_MARKET_STATUS_URL = "https://finnhub.io/api/v1/stock/market-status"
 
 # Market session — NYSE/NASDAQ core hours in America/New_York
 MARKET_TIMEZONE = "America/New_York"
-MARKET_OPEN = time(1, 30)
+MARKET_OPEN = time(9, 30)
 MARKET_CLOSE = time(16, 0)
 MARKET_DAYS = frozenset({0, 1, 2, 3, 4})  # Monday=0 … Friday=4
 MARKET_EXCHANGE = "US"
