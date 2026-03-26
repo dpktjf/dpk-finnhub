@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import shutil
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from homeassistant.const import Platform
@@ -21,6 +23,8 @@ PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.NUMBER, Platform.SWITCH]
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Finnhub from a config entry."""
+    await _ensure_frontend_asset(hass)
+
     coordinator = FinnhubCoordinator(hass, entry)
 
     # Schedule the first fetch in the background so HA startup is not
@@ -57,3 +61,39 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if unload_ok:
         hass.data[DOMAIN].pop(entry.entry_id, None)
     return unload_ok
+
+
+async def _ensure_frontend_asset(hass: HomeAssistant) -> None:
+    """Install/update the frontend card into /config/www."""
+    integration_dir = Path(__file__).parent
+
+    source = integration_dir / "www" / "finnhub-levels-card.js"
+    target_dir = Path(hass.config.path("www"))
+    target = target_dir / "finnhub-levels-card.js"
+
+    await hass.async_add_executor_job(
+        _copy_asset_if_needed,
+        source,
+        target_dir,
+        target,
+    )
+
+
+def _copy_asset_if_needed(source: Path, target_dir: Path, target: Path) -> None:
+    """Blocking filesystem logic executed in executor."""
+    target_dir.mkdir(exist_ok=True)
+
+    if not source.exists():
+        _LOGGER.warning(
+            "Finnhub: frontend asset missing: %s",
+            source,
+        )
+        return
+
+    if not target.exists() or source.stat().st_mtime > target.stat().st_mtime:
+        shutil.copy2(source, target)
+
+        _LOGGER.info(
+            "Finnhub: installed/updated frontend asset: %s",
+            target,
+        )
