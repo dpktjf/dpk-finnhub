@@ -50,6 +50,7 @@ async def async_setup_entry(
     symbols: list[str] = entry.data[CONF_SYMBOLS]
 
     entities: list[SensorEntity] = [FinnhubQuoteSensor(coordinator, symbol) for symbol in symbols]
+    entities.extend(FinnhubSignalSensor(coordinator, symbol) for symbol in symbols)
     entities.append(FinnhubHealthSensor(coordinator))
     entities.append(FinnhubRateLimiterSensor(coordinator))
     async_add_entities(entities)
@@ -177,6 +178,60 @@ class FinnhubQuoteSensor(CoordinatorEntity[FinnhubCoordinator], SensorEntity, Re
         age = datetime.now(tz=UTC).timestamp() - raw_ts
         threshold = self.coordinator.update_interval.total_seconds() * 2
         return age > threshold
+
+
+class FinnhubSignalSensor(CoordinatorEntity[FinnhubCoordinator], SensorEntity, RestoreEntity):
+    """Compact per-symbol signal sensor showing the last triggered level."""
+
+    _attr_icon = "mdi:bell-ring-outline"
+    _attr_has_entity_name = False
+
+    def __init__(self, coordinator: FinnhubCoordinator, symbol: str) -> None:
+        """Initialize the signal sensor."""
+        super().__init__(coordinator)
+        self._symbol = symbol.upper()
+        self._attr_unique_id = f"{DOMAIN}_{self._symbol.lower()}_signal"
+        self._attr_name = f"{self._symbol}_signal"
+        self.entity_id = f"sensor.market_{self._symbol.lower()}_signal"
+        self._attr_device_info = _ticker_device(self._symbol)
+        self._last_known_state: str | None = None
+        self._last_known_attributes: dict[str, Any] = {}
+
+    async def async_added_to_hass(self) -> None:
+        """Restore last known state on HA restart."""
+        await super().async_added_to_hass()
+        if (last_state := await self.async_get_last_state()) is not None:
+            self._last_known_state = last_state.state
+            self._last_known_attributes = dict(last_state.attributes)
+
+    @property
+    def native_value(self) -> str | None:
+        """Return current compact signal state."""
+        signal = self.coordinator.get_signal_state(self._symbol)
+        state = signal["state"]
+        if state is not None:
+            self._last_known_state = str(state)
+            return self._last_known_state
+        return self._last_known_state
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return signal metadata for dashboards/debugging."""
+        signal = self.coordinator.get_signal_state(self._symbol)
+        attrs = {
+            "symbol": self._symbol,
+            "last_triggered_level": signal["last_triggered_level"],
+            "last_triggered_at": signal["last_triggered_at"],
+            "last_triggered_price": signal["last_triggered_price"],
+            "current_price": signal["current_price"],
+            "alerts_enabled": signal["alerts_enabled"],
+            "hysteresis": signal["hysteresis"],
+            "armed_levels": signal["armed_levels"],
+        }
+        if attrs["current_price"] is None and self._last_known_attributes:
+            return self._last_known_attributes
+        self._last_known_attributes = attrs
+        return attrs
 
 
 class FinnhubHealthSensor(CoordinatorEntity[FinnhubCoordinator], SensorEntity):

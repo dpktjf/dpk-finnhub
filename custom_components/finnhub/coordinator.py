@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import math
 from datetime import date, datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo
 
 import aiohttp
@@ -18,10 +18,12 @@ from homeassistant.util import dt as dt_util
 
 from .api import FinnhubApiError, FinnhubClient, MarketStatus, QuoteResult
 from .const import (
+    ALL_LEVELS,
     CONF_SCAN_INTERVAL,
     CONF_SYMBOLS,
     DEFAULT_SCAN_INTERVAL_MINUTES,
     DOMAIN,
+    EVENT_PRICE_TRIGGER,
     HEALTH_ERROR,
     HEALTH_OK,
     HEALTH_PARTIAL,
@@ -35,6 +37,8 @@ from .const import (
     RATE_LIMIT_BURST_PERIOD,
     RATE_LIMIT_CALLS,
     RATE_LIMIT_PERIOD,
+    STATE_ALERTS_ENTITY_SUFFIX,
+    STATE_HYSTERESIS_ENTITY_SUFFIX,
 )
 from .rate_limiter import RateLimiter
 
@@ -43,6 +47,7 @@ if TYPE_CHECKING:
 
     from homeassistant.config_entries import ConfigEntry
     from homeassistant.core import HomeAssistant
+    from homeassistant.helpers.typing import StateType
 
 _LOGGER = logging.getLogger(__name__)
 _TZ = ZoneInfo(MARKET_TIMEZONE)
@@ -111,6 +116,8 @@ class FinnhubCoordinator(DataUpdateCoordinator[dict[str, QuoteResult]]):
         self.last_update_success_time: datetime | None = None
         self.health_status: str = HEALTH_OK
         self.failed_symbols: list[str] = []
+        self._alert_state: dict[str, dict[str, dict[str, object]]] = {}
+        self._signal_state: dict[str, dict[str, Any]] = {}
         self._client: FinnhubClient | None = None
 
         _LOGGER.debug(
@@ -143,6 +150,8 @@ class FinnhubCoordinator(DataUpdateCoordinator[dict[str, QuoteResult]]):
         self.update_interval = _safe_scan_interval(len(self.symbols), self._requested_scan_interval)
         self._client = None
         self._market_status = None
+        self._alert_state = {symbol: self._alert_state.get(symbol, {}) for symbol in self.symbols}
+        self._signal_state = {symbol: self._signal_state.get(symbol, {}) for symbol in self.symbols}
         self._market_status_fetched_at = 0.0
 
     async def _fetch_market_status(self) -> MarketStatus | None:
@@ -233,6 +242,219 @@ class FinnhubCoordinator(DataUpdateCoordinator[dict[str, QuoteResult]]):
 
         self._unsub_market_open = async_track_point_in_time(self.hass, _on_market_open, open_at)
 
+    def _switch_entity_id(self, symbol: str) -> str:
+        """Return the alert enable switch entity_id for a symbol."""
+        return f"switch.market_{symbol.lower()}{STATE_ALERTS_ENTITY_SUFFIX}"
+
+    def _hysteresis_entity_id(self, symbol: str) -> str:
+        """Return the hysteresis number entity_id for a symbol."""
+        return f"number.market_{symbol.lower()}{STATE_HYSTERESIS_ENTITY_SUFFIX}"
+
+    def _level_entity_id(self, symbol: str, level_key: str) -> str:
+        """Return the configured level number entity_id for a symbol/level."""
+        return f"number.market_{symbol.lower()}_{level_key}"
+
+    @staticmethod
+    def _state_as_float(value: StateType, default: float = 0.0) -> float:
+        """Convert a Home Assistant state value to float safely."""
+        if value in (None, "unknown", "unavailable"):
+            return default
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    def _alerts_enabled(self, symbol: str) -> bool:
+        """Return whether alerts are enabled for this symbol."""
+        state_obj = self.hass.states.get(self._switch_entity_id(symbol))
+        if state_obj is None:
+            return True
+        return state_obj.state == "on"
+
+    def _get_hysteresis(self, symbol: str) -> float:
+        """Return configured hysteresis for this symbol."""
+        entity_id = self._hysteresis_entity_id(symbol)
+        state_obj = self.hass.states.get(entity_id)
+        if state_obj is None:
+            _LOGGER.debug("Finnhub: missing hysteresis entity %s for symbol %s", entity_id, symbol)
+            return 0.0
+        return self._state_as_float(state_obj.state, default=0.0)
+
+    def _get_levels(self, symbol: str) -> dict[str, float]:
+        """Return configured levels for this symbol."""
+        levels: dict[str, float] = {}
+
+        for level_key in ALL_LEVELS:
+            entity_id = self._level_entity_id(symbol, level_key)
+            state_obj = self.hass.states.get(entity_id)
+
+            if state_obj is None:
+                _LOGGER.debug("Finnhub: missing level entity %s for symbol %s", entity_id, symbol)
+                levels[level_key] = 0.0
+            else:
+                levels[level_key] = self._state_as_float(state_obj.state, default=0.0)
+
+        return levels
+
+    def _ensure_alert_state(self, symbol: str, level_key: str) -> dict[str, object]:
+        """Return mutable latch state for a symbol/level pair."""
+        symbol_state = self._alert_state.setdefault(symbol, {})
+        return symbol_state.setdefault(
+            level_key,
+            {
+                "armed": True,
+                "last_triggered_at": None,
+                "last_triggered_price": None,
+                "last_direction": None,
+            },
+        )
+
+    def _ensure_signal_state(self, symbol: str) -> dict[str, Any]:
+        """Return mutable compact signal state for a symbol."""
+        return self._signal_state.setdefault(
+            symbol,
+            {
+                "state": "idle",
+                "last_triggered_level": None,
+                "last_triggered_at": None,
+                "last_triggered_price": None,
+                "current_price": None,
+                "alerts_enabled": True,
+                "hysteresis": 0.0,
+                "armed_levels": [],
+            },
+        )
+
+    def get_signal_state(self, symbol: str) -> dict[str, Any]:
+        """Return compact signal state for a symbol."""
+        return dict(self._ensure_signal_state(symbol))
+
+    def _update_signal_snapshot(
+        self,
+        *,
+        symbol: str,
+        current_price: float | None,
+        alerts_enabled: bool,
+        hysteresis: float,
+        levels: dict[str, float],
+    ) -> None:
+        """Refresh non-trigger snapshot fields."""
+        signal = self._ensure_signal_state(symbol)
+
+        signal["current_price"] = current_price
+        signal["alerts_enabled"] = alerts_enabled
+        signal["hysteresis"] = hysteresis
+
+        signal["armed_levels"] = [
+            level_key
+            for level_key, target in levels.items()
+            if target > 0 and bool(self._ensure_alert_state(symbol, level_key)["armed"])
+        ]
+
+    def _fire_trigger_event(
+        self,
+        *,
+        symbol: str,
+        level_key: str,
+        direction: str,
+        price: float,
+        target: float,
+        hysteresis: float,
+    ) -> None:
+        """Fire a one-shot HA event when a level crossing is detected."""
+        payload = {
+            "symbol": symbol,
+            "level": level_key,
+            "direction": direction,
+            "price": price,
+            "target": target,
+            "hysteresis": hysteresis,
+            "triggered_at": dt_util.now().isoformat(),
+        }
+        _LOGGER.debug("Finnhub: firing %s: %s", EVENT_PRICE_TRIGGER, payload)
+        self.hass.bus.async_fire(EVENT_PRICE_TRIGGER, payload)
+
+    async def _process_price_triggers(self, results: dict[str, QuoteResult]) -> None:
+        """Evaluate configured levels and fire one-shot trigger events."""
+        for symbol, quote in results.items():
+            price = quote.get("c")
+            if price is None:
+                continue
+
+            alerts_enabled = self._alerts_enabled(symbol)
+            hysteresis = self._get_hysteresis(symbol)
+            levels = self._get_levels(symbol)
+
+            self._update_signal_snapshot(
+                symbol=symbol,
+                current_price=price,
+                alerts_enabled=alerts_enabled,
+                hysteresis=hysteresis,
+                levels=levels,
+            )
+
+            if not alerts_enabled:
+                continue
+
+            for level_key, target in levels.items():
+                if target <= 0:
+                    continue
+
+                state = self._ensure_alert_state(symbol, level_key)
+                armed = bool(state["armed"])
+
+                if level_key.startswith("upper"):
+                    if armed and price >= target:
+                        self._fire_trigger_event(
+                            symbol=symbol,
+                            level_key=level_key,
+                            direction="up",
+                            price=price,
+                            target=target,
+                            hysteresis=hysteresis,
+                        )
+                        state["armed"] = False
+                        state["last_triggered_at"] = dt_util.now().isoformat()
+                        state["last_triggered_price"] = price
+                        state["last_direction"] = "up"
+
+                        signal = self._ensure_signal_state(symbol)
+                        signal["state"] = f"{level_key}_triggered"
+                        signal["last_triggered_level"] = level_key
+                        signal["last_triggered_at"] = state["last_triggered_at"]
+                        signal["last_triggered_price"] = price
+                    elif not armed and price <= (target - hysteresis):
+                        state["armed"] = True
+                elif armed and price <= target:
+                    self._fire_trigger_event(
+                        symbol=symbol,
+                        level_key=level_key,
+                        direction="down",
+                        price=price,
+                        target=target,
+                        hysteresis=hysteresis,
+                    )
+                    state["armed"] = False
+                    state["last_triggered_at"] = dt_util.now().isoformat()
+                    state["last_triggered_price"] = price
+                    state["last_direction"] = "down"
+
+                    signal = self._ensure_signal_state(symbol)
+                    signal["state"] = f"{level_key}_triggered"
+                    signal["last_triggered_level"] = level_key
+                    signal["last_triggered_at"] = state["last_triggered_at"]
+                    signal["last_triggered_price"] = price
+                elif not armed and price >= (target + hysteresis):
+                    state["armed"] = True
+
+            self._update_signal_snapshot(
+                symbol=symbol,
+                current_price=price,
+                alerts_enabled=alerts_enabled,
+                hysteresis=hysteresis,
+                levels=levels,
+            )
+
     async def _async_update_data(self) -> dict[str, QuoteResult]:  # noqa: PLR0912, PLR0915
         """Fetch all symbol quotes, respecting the rate limit."""
         try:
@@ -306,6 +528,7 @@ class FinnhubCoordinator(DataUpdateCoordinator[dict[str, QuoteResult]]):
             self.health_status = HEALTH_OK
 
         self.last_update_success_time = dt_util.now()
+        await self._process_price_triggers(results)
         next_call = dt_util.now() + self.update_interval
         _LOGGER.debug(
             "Finnhub: fetch complete — %d/%d symbols updated, next call at %s",

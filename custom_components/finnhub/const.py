@@ -19,6 +19,9 @@ LEVEL_LOWER_2 = "lower_2"
 ALL_LEVELS = [LEVEL_UPPER_1, LEVEL_UPPER_2, LEVEL_LOWER_1, LEVEL_LOWER_2]
 
 # Per-ticker config entity defaults
+EVENT_PRICE_TRIGGER = "finnhub_price_trigger"
+STATE_ALERTS_ENTITY_SUFFIX = "_alerts"
+STATE_HYSTERESIS_ENTITY_SUFFIX = "_hysteresis"
 DEFAULT_HYSTERESIS = 0.5  # USD — price must move this far back before re-alerting
 MIN_HYSTERESIS = 0.0
 MAX_HYSTERESIS = 50.0
@@ -30,7 +33,7 @@ FINNHUB_MARKET_STATUS_URL = "http://127.0.0.1:5000/api/v1/stock/market-status"  
 
 # Market session — NYSE/NASDAQ core hours in America/New_York
 MARKET_TIMEZONE = "America/New_York"
-MARKET_OPEN = time(9, 30)
+MARKET_OPEN = time(1, 30)
 MARKET_CLOSE = time(16, 0)
 MARKET_DAYS = frozenset({0, 1, 2, 3, 4})  # Monday=0 … Friday=4
 MARKET_EXCHANGE = "US"
