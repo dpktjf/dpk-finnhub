@@ -142,7 +142,34 @@ class FinnhubLevelsCard extends HTMLElement {
     this._levels[symbol][levelKey] = value;
     this._saved = false;
     this._error = null;
-    this._render();
+    this._refreshStatusOnly();
+  }
+
+
+  _refreshStatusOnly() {
+    if (!this.shadowRoot) return;
+
+    const button = this.shadowRoot.getElementById("save-btn");
+    if (button) {
+      button.textContent = this._saving ? "Saving..." : this._saved ? "Saved" : "Save levels";
+      button.disabled = this._saving;
+      button.style.opacity = this._saving ? "0.7" : "1";
+      button.style.background = this._saved ? "#16a34a" : "var(--primary-color)";
+    }
+
+    const status = this.shadowRoot.getElementById("status-msg");
+    if (status) {
+      if (this._error) {
+        status.className = "status error";
+        status.textContent = this._error;
+      } else if (this._saved) {
+        status.className = "status ok";
+        status.textContent = "Levels saved";
+      } else {
+        status.className = "status hint";
+        status.textContent = "Set 0 to disable a level.";
+      }
+    }
   }
 
   async _saveAll() {
@@ -151,7 +178,7 @@ class FinnhubLevelsCard extends HTMLElement {
     this._saving = true;
     this._saved = false;
     this._error = null;
-    this._render();
+    this._refreshStatusOnly();
 
     try {
       for (const symbol of this._config.symbols) {
@@ -173,15 +200,15 @@ class FinnhubLevelsCard extends HTMLElement {
       clearTimeout(this._saveTimer);
       this._saveTimer = setTimeout(() => {
         this._saved = false;
-        this._render();
+        this._refreshStatusOnly();
       }, 2500);
 
-      this._render();
+      this._refreshStatusOnly();
     } catch (err) {
       this._saving = false;
       this._saved = false;
       this._error = err?.message || String(err);
-      this._render();
+      this._refreshStatusOnly();
     }
   }
 

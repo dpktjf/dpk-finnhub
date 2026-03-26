@@ -93,7 +93,7 @@ def _copy_asset_if_needed(source: Path, target_dir: Path, target: Path) -> None:
     if not target.exists() or source.stat().st_mtime > target.stat().st_mtime:
         shutil.copy2(source, target)
 
-        _LOGGER.info(
+        _LOGGER.debug(
             "Finnhub: installed/updated frontend asset: %s",
             target,
         )

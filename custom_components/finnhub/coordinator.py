@@ -351,7 +351,7 @@ class FinnhubCoordinator(DataUpdateCoordinator[dict[str, QuoteResult]]):
             if target > 0 and bool(self._ensure_alert_state(symbol, level_key)["armed"])
         ]
 
-    def _fire_trigger_event(
+    def _fire_trigger_event(  # noqa: PLR0913
         self,
         *,
         symbol: str,
