@@ -73,6 +73,7 @@ def _safe_scan_interval(symbol_count: int, requested_minutes: int) -> timedelta:
             effective_minutes,
         )
     return timedelta(minutes=effective_minutes)
+    # return timedelta(seconds=1)  # for testing only — speed up cycles during development  # noqa: ERA001
 
 
 def next_market_open() -> datetime:

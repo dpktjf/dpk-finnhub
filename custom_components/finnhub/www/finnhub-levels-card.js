@@ -23,11 +23,15 @@ class FinnhubLevelsCard extends HTMLElement {
     };
 
     this._levels = {};
+    this._alertsEnabled = {};
     this._saving = false;
     this._saved = false;
+    this._dirty = false;
     this._error = null;
     this._saveTimer = null;
     this._bound = false;
+    this._editing = new Set();
+    this._hasRendered = false;
   }
 
   setConfig(config) {
@@ -58,7 +62,12 @@ class FinnhubLevelsCard extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
     this._syncFromHass();
-    this._render();
+    if (!this._hasRendered) {
+      this._render();
+      this._hasRendered = true;
+    } else {
+      this._refreshFromHass();
+    }
   }
 
   getCardSize() {
@@ -67,10 +76,10 @@ class FinnhubLevelsCard extends HTMLElement {
 
   _levelMeta() {
     return {
-      upper_1: { label: "Upper 1", hint: "Resistance / call target", cls: "upper1" },
-      upper_2: { label: "Upper 2", hint: "Extended resistance", cls: "upper2" },
-      lower_1: { label: "Lower 1", hint: "Support / put target", cls: "lower1" },
-      lower_2: { label: "Lower 2", hint: "Extended support", cls: "lower2" },
+      upper_1: { label: "Primary Upper", hint: "Resistance / call target", cls: "upper1" },
+      upper_2: { label: "Secondary Upper", hint: "Extended resistance", cls: "upper2" },
+      lower_1: { label: "Primary Lower", hint: "Support / put target", cls: "lower1" },
+      lower_2: { label: "Secondary Lower", hint: "Extended support", cls: "lower2" },
     };
   }
 
@@ -82,6 +91,10 @@ class FinnhubLevelsCard extends HTMLElement {
     return `number.market_${symbol.toLowerCase()}_${levelKey}`;
   }
 
+  _switchEntityId(symbol) {
+    return `switch.market_${symbol.toLowerCase()}_alerts`;
+  }
+
   _getState(entityId) {
     return this._hass?.states?.[entityId] ?? null;
   }
@@ -90,6 +103,34 @@ class FinnhubLevelsCard extends HTMLElement {
     if (!stateObj) return null;
     const value = Number(stateObj.state);
     return Number.isFinite(value) ? value : null;
+  }
+
+  _normalizeDraftNumber(rawValue) {
+    if (rawValue === "" || rawValue === null || rawValue === undefined) {
+      return 0;
+    }
+    const value = Number(rawValue);
+    return Number.isFinite(value) ? value : 0;
+  }
+
+  _isFieldDirty(symbol, levelKey) {
+    const draft = this._normalizeDraftNumber(this._levels[symbol]?.[levelKey] ?? "");
+    const stateObj = this._getState(this._levelEntityId(symbol, levelKey));
+    const current = this._parseNumber(stateObj) ?? 0;
+    return draft !== current;
+  }
+
+  _recomputeDirty() {
+    this._dirty = false;
+
+    for (const symbol of this._config.symbols ?? []) {
+      for (const levelKey of Object.keys(this._levelMeta())) {
+        if (this._isFieldDirty(symbol, levelKey)) {
+          this._dirty = true;
+          return;
+        }
+      }
+    }
   }
 
   _formatPrice(value) {
@@ -115,6 +156,35 @@ class FinnhubLevelsCard extends HTMLElement {
 `;
   }
 
+
+  _validateLevels() {
+    for (const symbol of this._config.symbols ?? []) {
+      const u1 = this._normalizeDraftNumber(this._levels[symbol]?.upper_1);
+      const u2 = this._normalizeDraftNumber(this._levels[symbol]?.upper_2);
+      const l1 = this._normalizeDraftNumber(this._levels[symbol]?.lower_1);
+      const l2 = this._normalizeDraftNumber(this._levels[symbol]?.lower_2);
+
+      // Ignore disabled levels (0)
+      if (u1 !== 0 && u2 !== 0 && u2 <= u1) {
+        return {
+          ok: false,
+          message: `${symbol}: Secondary Upper must be greater than Primary Upper`,
+          fields: [`${symbol}:upper_1`, `${symbol}:upper_2`],
+        };
+      }
+
+      if (l1 !== 0 && l2 !== 0 && l2 >= l1) {
+        return {
+          ok: false,
+          message: `${symbol}: Secondary Lower must be less than Primary Lower`,
+          fields: [`${symbol}:lower_1`, `${symbol}:lower_2`],
+        };
+      }
+    }
+
+    return { ok: true };
+  }
+
   _syncFromHass() {
     if (!this._hass) return;
 
@@ -128,7 +198,15 @@ class FinnhubLevelsCard extends HTMLElement {
         };
       }
 
+      const switchObj = this._getState(this._switchEntityId(symbol));
+      this._alertsEnabled[symbol] = switchObj ? switchObj.state === "on" : true;
+
       for (const levelKey of Object.keys(this._levelMeta())) {
+        const editKey = `${symbol}:${levelKey}`;
+        if (this._editing.has(editKey)) {
+          continue;
+        }
+
         const stateObj = this._getState(this._levelEntityId(symbol, levelKey));
         if (!stateObj) continue;
 
@@ -136,12 +214,20 @@ class FinnhubLevelsCard extends HTMLElement {
         this._levels[symbol][levelKey] = val === null ? "" : String(val);
       }
     }
+
+    this._recomputeDirty();
   }
 
   _onInput(symbol, levelKey, value) {
     this._levels[symbol][levelKey] = value;
-    this._saved = false;
     this._error = null;
+    this._saved = false;
+
+    this.shadowRoot
+      ?.querySelectorAll(".level-invalid")
+      .forEach((el) => el.classList.remove("level-invalid"));
+
+    this._recomputeDirty();
     this._refreshStatusOnly();
   }
 
@@ -151,10 +237,20 @@ class FinnhubLevelsCard extends HTMLElement {
 
     const button = this.shadowRoot.getElementById("save-btn");
     if (button) {
-      button.textContent = this._saving ? "Saving..." : this._saved ? "Saved" : "Save levels";
-      button.disabled = this._saving;
+      button.textContent = this._saving
+        ? "Saving..."
+        : this._saved
+          ? "Saved"
+          : this._dirty
+            ? "Save levels"
+            : "No changes";
+      button.disabled = this._saving || !this._dirty;
       button.style.opacity = this._saving ? "0.7" : "1";
-      button.style.background = this._saved ? "#16a34a" : "var(--primary-color)";
+      button.style.background = this._saved
+        ? "#16a34a"
+        : this._dirty
+          ? "var(--primary-color)"
+          : "var(--disabled-color)";
     }
 
     const status = this.shadowRoot.getElementById("status-msg");
@@ -165,6 +261,9 @@ class FinnhubLevelsCard extends HTMLElement {
       } else if (this._saved) {
         status.className = "status ok";
         status.textContent = "Levels saved";
+      } else if (this._dirty) {
+        status.className = "status hint";
+        status.textContent = "Unsaved changes";
       } else {
         status.className = "status hint";
         status.textContent = "Set 0 to disable a level.";
@@ -172,11 +271,138 @@ class FinnhubLevelsCard extends HTMLElement {
     }
   }
 
+  _refreshFromHass() {
+    if (!this.shadowRoot) return;
+
+    for (const symbol of this._config.symbols ?? []) {
+
+      // --- update row enabled/disabled visual state ---
+      const row = this.shadowRoot.querySelector(
+        `tr[data-symbol-row="${symbol}"]`
+      );
+
+      if (row) {
+        const enabled = Boolean(this._alertsEnabled[symbol]);
+        row.classList.toggle("row-disabled", !enabled);
+      }
+
+      const priceEl = this.shadowRoot.querySelector(`[data-price-symbol="${symbol}"]`);
+      if (priceEl) {
+        const price = this._parseNumber(this._getState(this._priceEntityId(symbol)));
+        priceEl.textContent = this._config.show_price ? this._formatPrice(price) : "";
+      }
+
+      const switchInput = this.shadowRoot.querySelector(
+        `input[data-symbol="${symbol}"][data-role="alerts-switch"]`
+      );
+      if (switchInput instanceof HTMLInputElement) {
+        const enabled = Boolean(this._alertsEnabled[symbol]);
+        switchInput.checked = enabled;
+      }
+
+      const switchLabel = this.shadowRoot.querySelector(
+        `[data-alerts-label="${symbol}"]`
+      );
+      if (switchLabel) {
+        switchLabel.textContent = this._alertsEnabled[symbol] ? "On" : "Off";
+      }
+
+      for (const levelKey of Object.keys(this._levelMeta())) {
+        const editKey = `${symbol}:${levelKey}`;
+        const input = this.shadowRoot.querySelector(
+          `input[data-symbol="${symbol}"][data-level="${levelKey}"]`
+        );
+
+        if (!(input instanceof HTMLInputElement)) continue;
+
+        if (input.dataset.role === "alerts-switch") {
+          const enabled = Boolean(this._alertsEnabled[symbol]);
+          input.checked = enabled;
+
+          const label = this.shadowRoot.querySelector(
+            `[data-alerts-label="${symbol}"]`
+          );
+          if (label) {
+            label.textContent = enabled ? "On" : "Off";
+          }
+        }
+
+        if (!this._editing.has(editKey)) {
+          const raw = this._levels[symbol]?.[levelKey] ?? "";
+          input.value = raw;
+        }
+      }
+    }
+
+    this._refreshStatusOnly();
+  }
+
+  async _toggleAlerts(symbol, enabled) {
+    if (!this._hass) return;
+
+    const row = this.shadowRoot.querySelector(
+      `tr[data-symbol-row="${symbol}"]`
+    );
+
+    row?.classList.add("toggle-saving");
+
+    this._error = null;
+    this._alertsEnabled[symbol] = enabled;
+    this._refreshFromHass();
+
+    try {
+      await this._hass.callService(
+        "switch",
+        enabled ? "turn_on" : "turn_off",
+        {
+          entity_id: this._switchEntityId(symbol),
+        }
+      );
+    } catch (err) {
+      this._alertsEnabled[symbol] = !enabled;
+      this._error = err?.message || String(err);
+      this._refreshFromHass();
+    } finally {
+      row?.classList.remove("toggle-saving");
+    }
+
+  }
+
+  _highlightInvalidFields(fields) {
+    if (!this.shadowRoot) return;
+
+    // Clear previous highlights
+    this.shadowRoot
+      .querySelectorAll(".level-invalid")
+      .forEach((el) => el.classList.remove("level-invalid"));
+
+    for (const key of fields) {
+      const [symbol, level] = key.split(":");
+
+      const input = this.shadowRoot.querySelector(
+        `input[data-symbol="${symbol}"][data-level="${level}"]`
+      );
+
+      if (input) {
+        input.classList.add("level-invalid");
+      }
+    }
+  }
+
   async _saveAll() {
     if (!this._hass || this._saving) return;
 
+    const validation = this._validateLevels();
+    if (!validation.ok) {
+      this._error = validation.message;
+      this._highlightInvalidFields(validation.fields);
+      this._refreshStatusOnly();
+      return;
+    }
+
     this._saving = true;
     this._saved = false;
+    this._dirty = false;
     this._error = null;
     this._refreshStatusOnly();
 
@@ -215,6 +441,22 @@ class FinnhubLevelsCard extends HTMLElement {
   _bindEvents() {
     if (this._bound) return;
 
+    this.shadowRoot.addEventListener("focusin", (ev) => {
+      const target = ev.target;
+      if (!(target instanceof HTMLInputElement)) return;
+      if (!target.dataset.symbol || !target.dataset.level) return;
+
+      this._editing.add(`${target.dataset.symbol}:${target.dataset.level}`);
+    });
+
+    this.shadowRoot.addEventListener("focusout", (ev) => {
+      const target = ev.target;
+      if (!(target instanceof HTMLInputElement)) return;
+      if (!target.dataset.symbol || !target.dataset.level) return;
+
+      this._editing.delete(`${target.dataset.symbol}:${target.dataset.level}`);
+    });
+
     this.shadowRoot.addEventListener("input", (ev) => {
       const target = ev.target;
       if (!(target instanceof HTMLInputElement)) return;
@@ -230,6 +472,37 @@ class FinnhubLevelsCard extends HTMLElement {
       if (target.id === "save-btn") {
         this._saveAll();
       }
+      if (target.dataset.role === "alerts-switch") {
+        const symbol = target.dataset.symbol;
+        if (!symbol) return;
+
+        this._toggleAlerts(symbol, target.checked);
+      }
+    });
+
+    this.shadowRoot.addEventListener("change", (ev) => {
+      const target = ev.target;
+      if (!(target instanceof HTMLInputElement)) return;
+
+      if (target.dataset.role === "alerts-switch") {
+        ev.stopPropagation();
+      }
+    });
+
+    // Press Enter inside any level field to save
+    this.shadowRoot.addEventListener("keydown", (ev) => {
+      if (ev.key !== "Enter") return;
+
+      const target = ev.target;
+
+      if (!(target instanceof HTMLInputElement)) return;
+
+      // Only trigger if something actually changed
+      if (!this._dirty) return;
+
+      ev.preventDefault();
+
+      this._saveAll();
     });
 
     this._bound = true;
@@ -243,6 +516,7 @@ class FinnhubLevelsCard extends HTMLElement {
 
     const rows = symbols
       .map((symbol) => {
+        const alertsEnabled = this._alertsEnabled[symbol] ?? true;
         const price = this._parseNumber(this._getState(this._priceEntityId(symbol)));
         const priceDisplay = this._config.show_price ? this._formatPrice(price) : "";
 
@@ -268,10 +542,28 @@ class FinnhubLevelsCard extends HTMLElement {
           .join("");
 
         return `
-<tr>
+<tr
+  data-symbol-row="${symbol}"
+  class="${alertsEnabled ? "" : "row-disabled"}">
   <td class="symbol-col">
     <div class="symbol">${symbol}</div>
-    ${this._config.show_price ? `<div class="price">${priceDisplay}</div>` : ""}
+    ${this._config.show_price ? `<div class="price" data-price-symbol="${symbol}">${priceDisplay}</div>` : ""}
+  </td>
+  <td class="alerts-col">
+    <label class="toggle-wrap">
+      <input
+        class="toggle-native"
+        type="checkbox"
+        data-symbol="${symbol}"
+        data-role="alerts-switch"
+        title="Enable or disable all alerts for this symbol"
+        ${alertsEnabled ? "checked" : ""}
+      />
+      <span class="toggle-box" aria-hidden="true"></span>
+      <span class="toggle-label" data-alerts-label="${symbol}">
+        ${alertsEnabled ? "On" : "Off"}
+      </span>
+    </label>
   </td>
   ${cells}
 </tr>
@@ -282,20 +574,24 @@ class FinnhubLevelsCard extends HTMLElement {
     const headers = Object.values(meta)
       .map(
         (m) => `
-<th>
-  <div class="head-label">${m.label}</div>
-  <div class="head-hint">${m.hint}</div>
-</th>
-`
-      )
-      .join("");
+          <th>
+            <div class="head-label">${m.label}</div>
+            <div class="head-hint">${m.hint}</div>
+          </th>
+        `).join("");
 
+    const alertsHeader = `
+       <th class="alerts-head">
+         <div class="head-label">Alerts</div>
+         <div class="head-hint">Symbol on/off</div>
+       </th>
+     `;
     const saveLabel = this._saving ? "Saving..." : this._saved ? "Saved" : "Save levels";
     const statusHtml = this._error
-      ? `<div class="status error">${this._error}</div>`
+      ? `<div id="status-msg" class="status error">${this._error}</div>`
       : this._saved
-        ? `<div class="status ok">Levels saved</div>`
-        : `<div class="status hint">Set 0 to disable a level.</div>`;
+        ? `<div id="status-msg" class="status ok">Levels saved</div>`
+        : `<div id="status-msg" class="status hint">Set 0 to disable a level.</div>`;
 
     this.shadowRoot.innerHTML = `
 <style>
@@ -315,6 +611,90 @@ class FinnhubLevelsCard extends HTMLElement {
     margin-bottom: 14px;
   }
 
+  .row-disabled {
+    opacity: 0.6;
+    transition: opacity 0.15s ease;
+  }
+
+  .row-disabled input[type="number"] {
+    background: var(--disabled-color);
+    color: var(--secondary-text-color);
+    border-color: var(--divider-color);
+  }
+
+  .alerts-col,
+  .alerts-head {
+    text-align: center;
+    vertical-align: middle;
+    white-space: nowrap;
+    width: 1%;
+    padding: 8px 6px;
+  }
+
+  .toggle-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    width: 72px;
+    margin: 0 auto;
+    position: relative;
+    cursor: pointer;
+  }
+
+  .toggle-native {
+    position: absolute;
+    opacity: 0;
+    width: 16px;
+    height: 16px;
+    margin: 0;
+    inset: 0 auto auto 50%;
+    transform: translateX(-50%);
+    pointer-events: auto;
+  }
+  .toggle-box {
+    display: block;
+    width: 16px;
+    height: 16px;
+    border: 2px solid var(--secondary-text-color);
+    border-radius: 4px;
+    box-sizing: border-box;
+    position: relative;
+    flex: 0 0 auto;
+  }
+
+  .toggle-native:checked + .toggle-box::after {
+    content: "";
+    position: absolute;
+    left: 4px;
+    top: 0px;
+    width: 4px;
+    height: 8px;
+    border: solid var(--primary-color);
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+  }
+
+  .toggle-saving {
+    opacity: 0.6;
+    pointer-events: none;
+  }
+
+  .toggle-native:focus-visible + .toggle-box {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
+    }
+
+  .toggle-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--secondary-text-color);
+    text-align: center;
+    line-height: 1;
+    display: block;
+  }
+
   .title {
     font-size: 16px;
     font-weight: 600;
@@ -325,6 +705,11 @@ class FinnhubLevelsCard extends HTMLElement {
     margin-top: 4px;
     color: var(--secondary-text-color);
     font-size: 12px;
+  }
+
+  .level-invalid {
+    border-color: var(--error-color);
+    background: rgba(255, 0, 0, 0.06);
   }
 
   button {
@@ -360,6 +745,7 @@ class FinnhubLevelsCard extends HTMLElement {
   table {
     width: 100%;
     border-collapse: collapse;
+    table-layout: auto;
   }
 
   th,
@@ -370,6 +756,7 @@ class FinnhubLevelsCard extends HTMLElement {
   th {
     padding: 8px 6px 10px;
     text-align: center;
+    width: 1%;
     vertical-align: bottom;
   }
 
@@ -406,17 +793,19 @@ class FinnhubLevelsCard extends HTMLElement {
   .cell {
     padding: 8px 6px;
     vertical-align: top;
+    text-align: center;
   }
 
   .input-wrap {
     display: flex;
     flex-direction: column;
     gap: 4px;
-    align-items: stretch;
+    align-items: center;
   }
 
   input {
-    width: 88px;
+    width: 72px;
+    min-width: 72px;
     padding: 6px 8px;
     border: 1px solid var(--divider-color);
     border-radius: 8px;
@@ -433,7 +822,8 @@ class FinnhubLevelsCard extends HTMLElement {
 
   .badge {
     display: inline-block;
-    align-self: flex-end;
+    align-self: center;
+    text-align: center;
     font-size: 11px;
     font-weight: 600;
     padding: 2px 6px;
@@ -485,6 +875,7 @@ class FinnhubLevelsCard extends HTMLElement {
       <thead>
         <tr>
           <th></th>
+          ${alertsHeader}
           ${headers}
         </tr>
       </thead>
@@ -510,3 +901,4 @@ window.customCards.push({
   name: "Finnhub Levels Card",
   description: "Edit number.market_<symbol>_<level> entities for Finnhub price levels.",
 });
+console.info("finnhub-levels-card build 2026-03-27-checkbox-center-3");

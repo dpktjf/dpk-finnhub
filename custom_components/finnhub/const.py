@@ -1,8 +1,36 @@
 """Constants for the Finnhub integration."""
 
+import logging
+import os
 from datetime import time
 
+_LOGGER = logging.getLogger(__name__)
 DOMAIN = "finnhub"
+
+ENV = os.getenv("FINNHUB_ENV", "prod").lower()
+
+CONFIG = {
+    "prod": {
+        "MARKET_OPEN": time(9, 30),
+        "MARKET_CLOSE": time(16, 0),
+        "MARKET_DAYS": frozenset({0, 1, 2, 3, 4}),  # Monday=0 … Friday=4
+        "QUOTE_URL": "https://finnhub.io/api/v1/quote",
+        "STATUS_URL": "https://finnhub.io/api/v1/stock/market-status",
+    },
+    "dev": {
+        "MARKET_OPEN": time(1, 30),
+        "MARKET_CLOSE": time(21, 0),
+        "MARKET_DAYS": frozenset({0, 1, 2, 3, 4, 5, 6}),  # Allow testing market open/close logic every day in dev
+        "QUOTE_URL": "http://127.0.0.1:5000/api/v1/quote",
+        "STATUS_URL": "http://127.0.0.1:5000/api/v1/stock/market-status",
+    },
+}
+
+cfg = CONFIG.get(ENV, CONFIG["prod"])
+_LOGGER.debug(
+    "Finnhub running in %s environment",
+    ENV,
+)
 
 CONF_SYMBOLS = "symbols"
 CONF_MARKET_OPEN = "market_open"
@@ -26,16 +54,15 @@ DEFAULT_HYSTERESIS = 0.5  # USD — price must move this far back before re-aler
 MIN_HYSTERESIS = 0.0
 MAX_HYSTERESIS = 50.0
 
-FINNHUB_QUOTE_URL = "https://finnhub.io/api/v1/quote"
-FINNHUB_MARKET_STATUS_URL = "https://finnhub.io/api/v1/stock/market-status"
-# FINNHUB_QUOTE_URL = "http://127.0.0.1:5000/api/v1/quote"  # noqa: ERA001
-# FINNHUB_MARKET_STATUS_URL = "http://127.0.0.1:5000/api/v1/stock/market-status"  # noqa: ERA001
+
+FINNHUB_QUOTE_URL = cfg["QUOTE_URL"]
+FINNHUB_MARKET_STATUS_URL = cfg["STATUS_URL"]
 
 # Market session — NYSE/NASDAQ core hours in America/New_York
 MARKET_TIMEZONE = "America/New_York"
-MARKET_OPEN = time(9, 30)
-MARKET_CLOSE = time(16, 0)
-MARKET_DAYS = frozenset({0, 1, 2, 3, 4})  # Monday=0 … Friday=4
+MARKET_OPEN = cfg["MARKET_OPEN"]
+MARKET_CLOSE = cfg["MARKET_CLOSE"]
+MARKET_DAYS = cfg["MARKET_DAYS"]
 MARKET_EXCHANGE = "US"
 
 # How long to cache the market status response (avoid hammering the endpoint)
