@@ -76,10 +76,10 @@ class FinnhubLevelsCard extends HTMLElement {
 
   _levelMeta() {
     return {
-      upper_1: { label: "Primary Upper", hint: "Resistance / call target", cls: "upper1" },
-      upper_2: { label: "Secondary Upper", hint: "Extended resistance", cls: "upper2" },
-      lower_1: { label: "Primary Lower", hint: "Support / put target", cls: "lower1" },
-      lower_2: { label: "Secondary Lower", hint: "Extended support", cls: "lower2" },
+      lower_2: { label: "Lower (Far)", hint: "Extended support", cls: "lower2" },
+      lower_1: { label: "Lower (Near)", hint: "Support / put target", cls: "lower1" },
+      upper_1: { label: "Upper (Near)", hint: "Resistance / call target", cls: "upper1" },
+      upper_2: { label: "Upper (Far)", hint: "Extended resistance", cls: "upper2" },
     };
   }
 
