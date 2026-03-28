@@ -168,7 +168,7 @@ class FinnhubLevelsCard extends HTMLElement {
       if (u1 !== 0 && u2 !== 0 && u2 <= u1) {
         return {
           ok: false,
-          message: `${symbol}: Secondary Upper must be greater than Primary Upper`,
+          message: `${symbol}: Upper (Far) must be greater than Upper (Near)`,
           fields: [`${symbol}:upper_1`, `${symbol}:upper_2`],
         };
       }
@@ -176,7 +176,7 @@ class FinnhubLevelsCard extends HTMLElement {
       if (l1 !== 0 && l2 !== 0 && l2 >= l1) {
         return {
           ok: false,
-          message: `${symbol}: Secondary Lower must be less than Primary Lower`,
+          message: `${symbol}: Lower (Far) must be less than Lower (Near)`,
           fields: [`${symbol}:lower_1`, `${symbol}:lower_2`],
         };
       }
